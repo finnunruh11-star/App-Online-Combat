@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>TTRPG Combat</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Source+Sans+3:wght@400;500;600&display=swap');
+  :root {
+    --bg:#1a1a2e; --surface:#16213e; --surface2:#0f3460;
+    --accent:#e94560; --accent2:#f5a623;
+    --text:#e8e8f0; --text-muted:#8888a8;
+    --border:rgba(255,255,255,0.08);
+    --success:#4ade80; --danger:#f87171; --primary:#6366f1;
+    --sidebar:300px; --right-bar:240px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden}
+
+  /* LEFT SIDEBAR */
+  #sidebar{width:var(--sidebar);min-width:var(--sidebar);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+  #sidebar-header{padding:12px 14px 10px;background:linear-gradient(135deg,#0f3460,#16213e);border-bottom:1px solid var(--border);flex-shrink:0}
+  #sidebar-header h1{font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:var(--accent2);letter-spacing:1px;text-transform:uppercase}
+  .conn-row{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .conn-dot{width:8px;height:8px;border-radius:50%;background:#555;flex-shrink:0;transition:background .3s}
+  .conn-dot.connected{background:var(--success);box-shadow:0 0 6px var(--success)}
+  .conn-dot.error{background:var(--danger)}
+  .conn-label{font-size:12px;color:var(--text-muted)}
+  .role-badge{margin-left:auto;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;letter-spacing:.5px;text-transform:uppercase}
+  .role-badge.host{background:rgba(249,115,22,.2);color:#fb923c;border:1px solid rgba(249,115,22,.3)}
+  .role-badge.guest{background:rgba(99,102,241,.2);color:#818cf8;border:1px solid rgba(99,102,241,.3)}
+  #sidebar-body{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+  #sidebar-body::-webkit-scrollbar{width:4px}
+  #sidebar-body::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+
+  /* CANVAS */
+  #battle-wrap{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;background:repeating-linear-gradient(45deg,transparent,transparent 20px,rgba(255,255,255,.01) 20px,rgba(255,255,255,.01) 40px)}
+  canvas{border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,.6);cursor:crosshair;display:block}
+  canvas.can-drag{cursor:move}
+  canvas.drop-target-ready{outline:2px dashed rgba(245,166,35,.9);outline-offset:4px}
+  #canvas-container{position:relative;display:inline-block;line-height:0;}
+  #dice-canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;border-radius:8px;}
+
+  /* DICE PANEL */
+  #dice-panel{flex-shrink:0}
+  .dice-quick-btns{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+  .dice-qbtn{padding:6px 2px;font-size:11px;font-weight:700;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.25);color:#818cf8;border-radius:5px;cursor:pointer;text-align:center;transition:all .12s;line-height:1;width:auto}
+  .dice-qbtn:hover{background:rgba(99,102,241,.28);color:#c7d2fe;transform:translateY(-1px);filter:none}
+  .dice-qbtn.d20{background:rgba(245,166,35,.12);border-color:rgba(245,166,35,.3);color:var(--accent2)}
+  .dice-qbtn.d20:hover{background:rgba(245,166,35,.28)}
+  .dice-expr-row{display:flex;gap:5px;align-items:center}
+  .dice-expr-row input{font-size:12px;flex:1}
+  .dice-expr-row button{white-space:nowrap;width:auto;flex-shrink:0}
+  #diceResult{min-height:28px;text-align:center;padding:4px 0 2px;transition:all .3s}
+  #diceResult.rolling{color:var(--text-muted);font-size:12px;font-style:italic}
+  .dice-result-total{font-family:'Cinzel',serif;font-size:20px;font-weight:700;color:var(--accent2);letter-spacing:.5px}
+  .dice-result-breakdown{font-size:11px;color:var(--text-muted);margin-top:2px}
+  .dice-setting{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px}
+  .dice-setting-head{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px}
+  .dice-setting-value{color:var(--accent2);font-size:11px;font-weight:700;white-space:nowrap}
+  .dice-settings-grid{display:grid;grid-template-columns:1fr;gap:7px}
+  .dice-setting-note{font-size:11px;color:var(--text-muted);line-height:1.45}
+
+  /* RIGHT SIDEBAR */
+  #right-sidebar{width:var(--right-bar);min-width:var(--right-bar);background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;transition:width .2s,min-width .2s}
+  #right-sidebar.collapsed{width:28px;min-width:28px}
+  #rs-header{padding:9px 10px;background:linear-gradient(135deg,#0f3460,#16213e);border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden}
+  #rs-header h2{font-family:'Cinzel',serif;font-size:11px;font-weight:700;color:var(--accent2);letter-spacing:.8px;text-transform:uppercase;flex:1;overflow:hidden}
+  #rs-toggle-btn{background:rgba(255,255,255,.06);border:none;color:var(--text-muted);border-radius:4px;padding:2px 6px;font-size:13px;cursor:pointer;flex-shrink:0;transition:all .15s;width:auto;display:none}
+  #rs-toggle-btn.host-visible{display:inline-block}
+  #rs-toggle-btn:hover{color:var(--text);background:rgba(255,255,255,.12)}
+  #rs-body{flex:1;overflow:hidden;display:flex;flex-direction:column}
+  #rs-options{padding:7px 8px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:5px}
+  #rs-combat-flow{display:flex;gap:4px;display:none}
+  #rs-combat-flow.host-show{display:flex}
+  #initiativeOrderRight{flex:1;overflow-y:auto;padding:5px 6px;display:flex;flex-direction:column;gap:3px}
+  #initiativeOrderRight::-webkit-scrollbar{width:3px}
+  #initiativeOrderRight::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+  .init-r{padding:6px 8px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:6px;cursor:default;transition:all .15s}
+  .init-r.active-turn{background:rgba(245,166,35,.12);border-color:rgba(245,166,35,.4)}
+  .init-r.selectable{cursor:pointer}
+  .init-r.selectable:hover{background:rgba(255,255,255,.06)}
+  .init-r-top{display:flex;align-items:center;gap:5px}
+  .init-r .cdot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+  .init-r .rinfo{flex:1;min-width:0}
+  .init-r .rname{font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .init-r .rhp{font-size:10px;margin-top:1px}
+  .init-r .rmov{font-size:10px;margin-top:1px;color:#818cf8}
+  .hpbar{height:3px;background:rgba(255,255,255,.08);border-radius:2px;margin-top:3px;overflow:hidden}
+  .hpbar-fill{height:100%;border-radius:2px;transition:width .3s}
+  .movbar{height:3px;background:rgba(255,255,255,.08);border-radius:2px;margin-top:2px;overflow:hidden}
+  .movbar-fill{height:100%;border-radius:2px;background:var(--primary);transition:width .3s}
+  .ir-btns{display:flex;gap:3px;margin-top:4px}
+  .ping-btn,.ir-edit-btn,.ir-del-btn{border-radius:3px;padding:2px 5px;font-size:10px;cursor:pointer;width:auto;line-height:1;transition:all .12s}
+  .ping-btn{background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.25);color:#f87171}
+  .ping-btn:hover{background:rgba(248,113,113,.3);transform:none;filter:none}
+  .ir-edit-btn{background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text-muted)}
+  .ir-edit-btn:hover{background:rgba(255,255,255,.14);color:var(--text);transform:none;filter:none}
+  .ir-del-btn{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.2);color:rgba(248,113,113,.65)}
+  .ir-del-btn:hover{background:rgba(248,113,113,.25);color:#f87171;transform:none;filter:none}
+  .cur-arrow{color:var(--accent2);font-size:12px;flex-shrink:0}
+  #rs-collapsed-label{display:none;writing-mode:vertical-rl;color:var(--accent2);font-family:'Cinzel',serif;font-size:10px;letter-spacing:1px;text-align:center;flex:1;user-select:none}
+  #right-sidebar.collapsed #rs-collapsed-label{display:flex;align-items:center;justify-content:center}
+  #right-sidebar.collapsed #rs-body{display:none}
+  #right-sidebar.collapsed #rs-header h2,
+  #right-sidebar.collapsed #rs-options{display:none}
+
+  /* PANELS */
+  .panel{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:7px}
+  .panel-title{font-family:'Cinzel',serif;font-size:11px;font-weight:600;color:var(--accent2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px}
+  .small{font-size:12px;color:var(--text-muted);line-height:1.5}
+  .tab-buttons{display:flex;gap:3px;background:rgba(0,0,0,.3);padding:3px;border-radius:8px}
+  .tab-btn{flex:1;padding:6px 2px;font-size:11px;font-weight:600;background:transparent;color:var(--text-muted);border:none;border-radius:6px;cursor:pointer;transition:all .15s;white-space:nowrap}
+  .tab-btn.active{background:var(--surface2);color:var(--text)}
+  .tab-content{display:none;flex-direction:column;gap:7px}
+  .tab-content.active{display:flex}
+  label.field-label{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px}
+  input,select{width:100%;padding:6px 9px;background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;font-family:inherit;transition:border-color .15s}
+  input:focus,select:focus{outline:none;border-color:var(--primary)}
+  input[type="color"]{width:38px;height:32px;padding:2px;cursor:pointer;flex-shrink:0}
+  input[type="checkbox"]{width:auto}
+  select option{background:#1a1a2e}
+  .row{display:flex;gap:5px;align-items:flex-end;flex-wrap:wrap}
+  .row>*{flex:1;min-width:0}
+  .row>input[type="color"]{flex:none}
+  button{width:100%;padding:7px 10px;border:none;border-radius:6px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s}
+  button:hover{filter:brightness(1.1);transform:translateY(-1px)}
+  button:active{transform:translateY(0)}
+  .btn-primary{background:var(--primary);color:#fff}
+  .btn-success{background:#22c55e;color:#fff}
+  .btn-danger{background:var(--danger);color:#fff}
+  .btn-secondary{background:rgba(255,255,255,.08);color:var(--text)}
+  .btn-accent{background:linear-gradient(135deg,var(--accent),#f97316);color:#fff}
+  .btn-small{padding:4px 9px;font-size:12px;width:auto}
+  label.checkbox{display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer;color:var(--text)}
+  label.checkbox input{width:auto}
+  #currentTurnBanner{padding:8px 14px;background:linear-gradient(135deg,rgba(245,166,35,.15),rgba(245,166,35,.05));border:1px solid rgba(245,166,35,.3);border-radius:8px;text-align:center;font-family:'Cinzel',serif;font-size:13px;font-weight:600;color:var(--accent2);letter-spacing:.5px}
+  #currentTurnBanner.your-turn{background:linear-gradient(135deg,rgba(74,222,128,.2),rgba(74,222,128,.05));border-color:rgba(74,222,128,.4);color:var(--success);animation:pulse 1.5s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}}
+  .mode-indicator{font-size:12px;padding:4px 9px;border-radius:4px;text-align:center;font-weight:600;background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.3)}
+  #guestTargetInfo{font-size:12px;color:var(--text-muted);padding:5px 9px;background:rgba(0,0,0,.2);border-radius:6px;text-align:center}
+  #guestTargetInfo.has-target{color:var(--accent2)}
+  #localNickList{display:flex;flex-direction:column;gap:4px}
+  .nick-item{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:4px 8px;background:rgba(0,0,0,.2);border-radius:4px}
+  #distanceResult{padding:7px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);border-radius:6px;text-align:center;font-size:13px;font-weight:600;color:#818cf8;min-height:22px}
+  #pendingList{display:flex;flex-direction:column;gap:6px}
+  .req-card{padding:9px 10px;background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.2);border-radius:7px;display:flex;flex-direction:column;gap:5px}
+  .req-header{display:flex;justify-content:space-between;align-items:center;gap:6px}
+  .req-info{flex:1;font-size:12px}
+  .req-info strong{color:var(--accent2)}
+  .req-btns{display:flex;gap:4px;flex-shrink:0}
+  .req-mov{font-size:11px;line-height:1.7;padding:4px 7px;background:rgba(0,0,0,.3);border-radius:5px}
+  .req-warn{color:#f87171;font-weight:700}
+  #selectedHpName{font-size:12px;font-weight:600;color:var(--accent2);text-align:center;padding:4px;background:rgba(245,166,35,.06);border-radius:4px;border:1px solid rgba(245,166,35,.15);display:none}
+  .assign-token-row{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:3px}
+  .assign-token-row select{flex:1}
+  #editModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:center;justify-content:center}
+  #editModal.open{display:flex}
+  #editModalBox{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:300px;display:flex;flex-direction:column;gap:10px;box-shadow:0 20px 60px rgba(0,0,0,.8)}
+  #guestDrawPanel{display:none}
+  #guestDiceRequestPanel{display:flex}
+
+  /* ── PING RADIAL MENU ── */
+  #ping-overlay{position:fixed;inset:0;z-index:500;pointer-events:none;display:none}
+  #ping-overlay.active{display:block;pointer-events:auto;cursor:none}
+  #ping-canvas{position:absolute;inset:0;width:100%;height:100%}
+  /* ── REMINDER TOASTS ── */
+  #reminder-toasts{position:fixed;bottom:24px;right:260px;z-index:600;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+  .reminder-toast{background:linear-gradient(135deg,rgba(15,52,96,.97),rgba(22,33,62,.97));border:1px solid rgba(245,166,35,.55);border-radius:10px;padding:12px 14px;min-width:240px;max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,.7);pointer-events:auto;animation:toast-in .25s ease;position:relative;display:flex;flex-direction:column;gap:5px}
+  @keyframes toast-in{from{transform:translateX(40px);opacity:0}to{transform:translateX(0);opacity:1}}
+  .toast-header{display:flex;align-items:center;gap:8px;font-family:'Cinzel',serif;font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.6px}
+  .toast-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .toast-body{font-size:12px;color:var(--text);line-height:1.5;padding:4px 0 2px}
+  .toast-dismiss{position:absolute;top:8px;right:10px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:2px 5px;width:auto;line-height:1;border-radius:4px;transition:color .15s}
+  .toast-dismiss:hover{color:var(--text);transform:none;filter:none;background:rgba(255,255,255,.08)}
+  .toast-roll-btn{margin-top:6px;padding:6px 14px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-weight:700;cursor:pointer;font-size:13px;width:100%;transition:filter .15s}
+  .toast-roll-btn:hover{filter:brightness(1.15)}
+  .toast-roll-btn{margin-top:6px;padding:6px 14px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-weight:700;cursor:pointer;font-size:13px;width:100%;transition:filter .15s}
+  .toast-roll-btn:hover{filter:brightness(1.15)}
+  /* ── REMINDER UI in initiative rows ── */
+  .ir-reminders{margin-top:4px;padding-top:4px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:3px}
+  .ir-reminder-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.12);border-radius:4px;padding:3px 6px;line-height:1.4}
+  .ir-reminder-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ir-reminder-status{font-size:9px;color:rgba(99,102,241,.75);font-weight:700;letter-spacing:.2px;white-space:nowrap;flex-shrink:0;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2);padding:1px 4px;border-radius:3px}
+  .ir-reminder-status.exhausted{color:rgba(248,113,113,.6);background:rgba(248,113,113,.08);border-color:rgba(248,113,113,.2)}
+  .ir-reminder-edit-btn{background:none;border:none;color:rgba(255,255,255,.25);cursor:pointer;font-size:11px;padding:0 2px;width:auto;line-height:1;flex-shrink:0;transition:color .12s}
+  .ir-reminder-edit-btn:hover{color:var(--text-muted);transform:none;filter:none}
+  .ir-reminder-del{background:none;border:none;color:rgba(248,113,113,.5);cursor:pointer;font-size:11px;padding:0 2px;width:auto;line-height:1;flex-shrink:0}
+  .ir-reminder-del:hover{color:#f87171;transform:none;filter:none}
+  .ir-add-reminder{display:flex;flex-direction:column;gap:3px;margin-top:3px;background:rgba(245,166,35,.04);border:1px solid rgba(245,166,35,.15);border-radius:5px;padding:5px 6px}
+  .ir-add-reminder-row{display:flex;gap:3px;align-items:center}
+  .ir-add-reminder input[type="text"],.ir-add-reminder input:not([type]){flex:1;padding:3px 6px;font-size:11px;background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:4px;color:var(--text)}
+  .ir-add-reminder button{padding:3px 7px;font-size:11px;width:auto;flex-shrink:0}
+  .ir-reminder-fields{display:flex;gap:5px;align-items:center;font-size:10px;color:var(--text-muted)}
+  .ir-reminder-fields label{display:flex;align-items:center;gap:3px;white-space:nowrap}
+  .ir-reminder-fields input[type="number"]{width:44px;padding:2px 4px;font-size:11px;background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:4px;color:var(--text)}
+  .ir-reminder-type{display:flex;gap:3px;margin-top:1px}
+  .ir-reminder-type-btn{flex:1;background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text-muted);border-radius:4px;padding:3px 0;font-size:10px;cursor:pointer;width:auto;font-weight:600;transition:all .12s;text-align:center;line-height:1.4}
+  .ir-reminder-type-btn:hover{background:rgba(255,255,255,.08);transform:none;filter:none}
+  .ir-reminder-type-btn.active-repeating{background:rgba(99,102,241,.15);border-color:rgba(99,102,241,.35);color:#818cf8}
+  .ir-reminder-type-btn.active-once{background:rgba(245,166,35,.12);border-color:rgba(245,166,35,.3);color:var(--accent2)}
+  .ir-show-add-btn{background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.18);color:rgba(245,166,35,.7);border-radius:3px;padding:2px 6px;font-size:10px;cursor:pointer;width:auto;line-height:1;transition:all .12s;margin-top:2px}
+  .ir-show-add-btn:hover{background:rgba(245,166,35,.2);color:var(--accent2);transform:none;filter:none}
+
+
+  /* PORTRAIT EDITOR + AVATARS */
+  .portrait-picker{display:flex;gap:10px;align-items:flex-start;padding:8px 9px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px}
+  .portrait-preview,.portrait-preview-sm{width:64px;height:64px;border-radius:50%;background:#3a3a55 center/cover no-repeat;border:2px solid rgba(255,255,255,.14);flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;color:var(--text-muted);font-size:10px;text-align:center;padding:6px;line-height:1.25}
+  .portrait-preview-sm{width:28px;height:28px;border-width:1px;font-size:8px}
+  .portrait-preview.has-image,.portrait-preview-sm.has-image{color:transparent}
+  .portrait-actions{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+  .portrait-actions .row{flex-wrap:wrap}
+  .portrait-actions button{width:auto}
+  .portrait-tag{font-size:11px;color:var(--text-muted);line-height:1.35}
+  .portrait-file{display:none}
+  .portrait-clear{background:rgba(255,255,255,.08);border:1px solid var(--border);color:var(--text)}
+  .portrait-editor-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:250;align-items:center;justify-content:center;padding:20px}
+  .portrait-editor-modal.open{display:flex}
+  .portrait-editor-box{width:min(760px,96vw);background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,.85);overflow:hidden;display:flex;flex-direction:column}
+  .portrait-editor-head{padding:14px 16px;background:linear-gradient(135deg,#0f3460,#16213e);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+  .portrait-editor-head h3{font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:var(--accent2);letter-spacing:.5px;flex:1}
+  .portrait-editor-close{background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:6px 10px;width:auto}
+  .portrait-editor-body{display:flex;gap:18px;padding:18px;align-items:flex-start;flex-wrap:wrap}
+  .portrait-stage{position:relative;width:360px;max-width:100%;height:360px;border-radius:14px;overflow:hidden;background:#111;border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(255,255,255,.02)}
+  .portrait-stage canvas{display:block;width:100%;height:100%;cursor:grab}
+  .portrait-stage canvas.dragging{cursor:grabbing}
+  .portrait-stage::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:14px;box-shadow:inset 0 0 0 9999px rgba(0,0,0,.18)}
+  .portrait-guide{position:absolute;inset:14px;border:2px dashed rgba(245,166,35,.8);border-radius:50%;pointer-events:none;box-shadow:0 0 0 1px rgba(0,0,0,.25) inset}
+  .portrait-tools{flex:1;min-width:240px;display:flex;flex-direction:column;gap:12px}
+  .portrait-tools .small{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+  .portrait-slider{display:flex;flex-direction:column;gap:5px}
+  .portrait-slider label{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px}
+  .portrait-slider input[type='range']{width:100%}
+  .portrait-editor-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .portrait-editor-actions button{width:auto;flex:1;min-width:120px}
+  .portrait-note{font-size:12px;color:var(--text-muted);line-height:1.5}
+  .init-portrait{width:30px;height:30px;border-radius:50%;background:#3a3a55 center/cover no-repeat;border:1px solid rgba(255,255,255,.12);flex-shrink:0}
+
+  /* SORT ORDER TOGGLE */
+  .sort-toggle-btn{background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--text-muted);cursor:pointer;width:auto;white-space:nowrap;transition:all .15s;flex-shrink:0;letter-spacing:.3px;font-weight:600}
+  .sort-toggle-btn:hover{color:var(--text);background:rgba(255,255,255,.12);transform:none;filter:none}
+  .sort-toggle-btn.alpha-active{color:#818cf8;border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.12)}
+
+  /* ITEM CONTEXT MENU */
+  #itemContextMenu{position:fixed;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:10px;min-width:210px;max-width:270px;box-shadow:0 8px 36px rgba(0,0,0,.75);padding:6px 0;display:none}
+  #itemContextMenu.open{display:block}
+  .ctx-header{padding:8px 13px 6px;font-family:'Cinzel',serif;font-size:11px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid var(--border);margin-bottom:4px;display:flex;align-items:center;gap:7px}
+  .ctx-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+  .ctx-item{padding:6px 13px;font-size:12px;cursor:pointer;color:var(--text);display:flex;align-items:center;gap:7px;transition:background .1s}
+  .ctx-item:hover{background:rgba(255,255,255,.06)}
+  .ctx-item-icon{font-size:13px;flex-shrink:0}
+  .ctx-item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ctx-item.item-hidden-ctx .ctx-item-name{color:var(--text-muted);font-style:italic}
+  .ctx-no-items{padding:7px 13px;font-size:12px;color:var(--text-muted);font-style:italic}
+  .ctx-divider{height:1px;background:var(--border);margin:4px 0}
+  .ctx-action{padding:6px 13px;font-size:12px;cursor:pointer;color:var(--text-muted);display:flex;align-items:center;gap:7px;transition:all .1s}
+  .ctx-action:hover{background:rgba(255,255,255,.06);color:var(--text)}
+  .ctx-section-label{padding:4px 13px 2px;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;opacity:.6}
+
+  /* ITEM VIEWER MODAL */
+  #itemViewerModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;align-items:center;justify-content:center}
+  #itemViewerModal.open{display:flex}
+  #itemViewerBox{background:var(--surface);border:1px solid var(--border);border-radius:13px;width:500px;max-width:92vw;max-height:72vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.85);overflow:hidden}
+  #itemViewerHeader{padding:14px 18px 12px;background:linear-gradient(135deg,#0f3460,#16213e);border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px;flex-shrink:0}
+  #itemViewerTitleWrap{flex:1;min-width:0}
+  #itemViewerTitle{font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:var(--accent2);letter-spacing:.5px}
+  #itemViewerOwner{font-size:11px;color:var(--text-muted);margin-top:2px}
+  #itemViewerClose{background:rgba(255,255,255,.06);border:none;color:var(--text-muted);border-radius:5px;padding:4px 9px;cursor:pointer;font-size:14px;width:auto;flex-shrink:0;transition:all .15s}
+  #itemViewerClose:hover{color:var(--text);background:rgba(255,255,255,.12);transform:none;filter:none}
+  #itemViewerBody{padding:18px 20px;overflow-y:auto;flex:1;font-size:13px;line-height:1.75;color:var(--text);white-space:pre-wrap;font-family:'Source Sans 3',sans-serif;background:rgba(0,0,0,.15)}
+  #itemViewerBody::-webkit-scrollbar{width:4px}
+  #itemViewerBody::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+
+  /* ITEM MANAGEMENT IN INITIATIVE ROWS (host) */
+  .ir-items{margin-top:4px;padding-top:4px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:3px}
+  .ir-items-label{font-size:10px;font-weight:700;color:rgba(99,102,241,.6);text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px}
+  .ir-item-row{display:flex;align-items:center;gap:4px;font-size:11px;background:rgba(99,102,241,.05);border:1px solid rgba(99,102,241,.15);border-radius:4px;padding:3px 6px;transition:background .1s}
+  .ir-item-row:hover{background:rgba(99,102,241,.1)}
+  .ir-item-vis-btn{background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;width:auto;line-height:1;flex-shrink:0;transition:opacity .15s}
+  .ir-item-vis-btn:hover{transform:none;filter:none;opacity:.7}
+  .ir-item-name-btn{background:none;border:none;cursor:pointer;flex:1;text-align:left;color:var(--text);font-size:11px;padding:0 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:inherit;width:auto;transition:color .1s}
+  .ir-item-name-btn:hover{color:var(--accent2);transform:none;filter:none}
+  .ir-item-row.item-hidden .ir-item-name-btn{color:var(--text-muted)}
+  .ir-item-del-btn{background:none;border:none;color:rgba(248,113,113,.45);cursor:pointer;font-size:11px;padding:0 2px;width:auto;line-height:1;flex-shrink:0}
+  .ir-item-del-btn:hover{color:#f87171;transform:none;filter:none}
+  .ir-show-add-item-btn{background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.18);color:rgba(129,140,248,.7);border-radius:3px;padding:2px 6px;font-size:10px;cursor:pointer;width:auto;line-height:1;transition:all .12s;margin-top:2px}
+  .ir-show-add-item-btn:hover{background:rgba(99,102,241,.2);color:#818cf8;transform:none;filter:none}
+  .ir-add-item-form{display:flex;flex-direction:column;gap:3px;margin-top:3px}
+  .ir-add-item-form input,.ir-add-item-form textarea{padding:3px 6px;font-size:11px;background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;width:100%}
+  .ir-add-item-form textarea{resize:vertical;min-height:52px;line-height:1.5}
+  .ir-add-item-row{display:flex;gap:3px;margin-top:2px}
+  .ir-add-item-row button{padding:3px 7px;font-size:11px;width:auto;flex-shrink:0}
+
+  /* ENEMY DETAILS VIEWER MODAL */
+  #enemyDetailsModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;align-items:center;justify-content:center}
+  #enemyDetailsModal.open{display:flex}
+  #enemyDetailsBox{background:var(--surface);border:1px solid var(--border);border-radius:13px;width:520px;max-width:92vw;max-height:76vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.85);overflow:hidden}
+  #enemyDetailsHeader{padding:14px 18px 12px;background:linear-gradient(135deg,#0f3460,#16213e);border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px;flex-shrink:0}
+  #enemyDetailsTitleWrap{flex:1;min-width:0}
+  #enemyDetailsTitle{font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:var(--accent2);letter-spacing:.5px}
+  #enemyDetailsSubtitle{font-size:11px;color:var(--text-muted);margin-top:2px}
+  #enemyDetailsClose{background:rgba(255,255,255,.06);border:none;color:var(--text-muted);border-radius:5px;padding:4px 9px;cursor:pointer;font-size:14px;width:auto;flex-shrink:0;transition:all .15s}
+  #enemyDetailsClose:hover{color:var(--text);background:rgba(255,255,255,.12);transform:none;filter:none}
+  #enemyDetailsBody{padding:18px 20px;overflow-y:auto;flex:1;font-size:13px;line-height:1.75;color:var(--text);font-family:'Source Sans 3',sans-serif;background:rgba(0,0,0,.15)}
+  #enemyDetailsBody::-webkit-scrollbar{width:4px}
+  #enemyDetailsBody::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .detail-section{margin-bottom:12px}
+  .detail-section-title{font-family:'Cinzel',serif;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px}
+  .detail-section-title.weaknesses{color:#f87171}
+  .detail-section-title.resistances{color:#60a5fa}
+  .detail-section-title.immunities{color:#4ade80}
+  .detail-section-title.tactics{color:#fb923c}
+  .detail-section-title.notes{color:var(--text-muted)}
+  .detail-section-text{white-space:pre-wrap;color:var(--text);font-size:13px;line-height:1.6}
+
+  /* WIKI TEMPLATE SELECTOR */
+  #wikiTemplateSelector{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;align-items:center;justify-content:center}
+  #wikiTemplateSelector.open{display:flex}
+  #wikiTemplateSelectorBox{background:var(--surface);border:1px solid var(--border);border-radius:13px;width:400px;max-width:92vw;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.85);overflow:hidden}
+  #wikiTemplateSelectorHeader{padding:14px 18px 12px;background:linear-gradient(135deg,#0f3460,#16213e);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
+  #wikiTemplateSelectorHeader h3{font-family:'Cinzel',serif;font-size:14px;font-weight:700;color:var(--accent2);flex:1}
+  #wikiTemplateSelectorClose{background:rgba(255,255,255,.06);border:none;color:var(--text-muted);border-radius:5px;padding:4px 9px;cursor:pointer;font-size:14px;width:auto;flex-shrink:0}
+  #wikiTemplateSelectorClose:hover{color:var(--text);background:rgba(255,255,255,.12);transform:none;filter:none}
+  #wikiTemplateList{flex:1;overflow-y:auto;padding:10px}
+  #wikiTemplateList::-webkit-scrollbar{width:4px}
+  #wikiTemplateList::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .wiki-template-item{padding:10px 12px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;transition:all .15s}
+  .wiki-template-item:hover{background:rgba(245,166,35,.08);border-color:rgba(245,166,35,.3)}
+  .wiki-template-name{font-weight:600;font-size:13px;color:var(--accent2)}
+  .wiki-template-info{font-size:11px;color:var(--text-muted);margin-top:2px}
+  .wiki-drop-field{border:1px dashed rgba(245,166,35,.45);background:rgba(245,166,35,.06);border-radius:10px;padding:12px 10px;text-align:center;cursor:copy;transition:all .15s;user-select:none}
+  .wiki-drop-field:hover,.wiki-drop-field.drag-over{background:rgba(245,166,35,.14);border-color:rgba(245,166,35,.85);transform:translateY(-1px)}
+  .wiki-drop-title{font-family:'Cinzel',serif;font-size:12px;font-weight:700;color:var(--accent2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px}
+  .wiki-drop-note{font-size:11px;color:var(--text-muted);line-height:1.35}
+  input.wiki-import-file{display:none}
+
+</style>
+</head>
+<body>
+
+<!-- LEFT SIDEBAR -->
+<div id="sidebar">
+  <div id="sidebar-header">
+    <h1>⚔ TTRPG Combat</h1>
+    <div class="conn-row">
+      <div class="conn-dot" id="connDot"></div>
+      <span class="conn-label" id="connLabel">Connecting…</span>
+      <span class="role-badge" id="roleBadge"></span>
+    </div>
+  </div>
+
+  <div id="sidebar-body">
+    <div id="currentTurnBanner" style="display:none">Turn: <span id="currentTurnName">—</span></div>
+
+    <!-- HOST CONTROLS -->
+    <div id="hostControls" style="display:none">
+      <div class="panel" style="padding:6px">
+        <div class="tab-buttons">
+          <button class="tab-btn active" data-tab="setup">🗺 Setup</button>
+          <button class="tab-btn" data-tab="combat">⚔️ Combat</button>
+          <button class="tab-btn" data-tab="dice">🎲 Dice</button>
+          <button class="tab-btn" data-tab="draw">✏️ Draw</button>
+          <button class="tab-btn" data-tab="network">🌐 Net</button>
+        </div>
+
+        <!-- SETUP TAB -->
+        <div class="tab-content active" id="tab-setup">
+          <div class="panel-title">Add Participant</div>
+          <div><label class="field-label">Name</label><input id="name" placeholder="Character name…" /></div>
+          <div class="row">
+            <div><label class="field-label">Initiative</label><input id="initiative" type="number" placeholder="0" /></div>
+            <div><label class="field-label">Speed (units)</label><input id="movespeed" type="number" placeholder="30" /></div>
+            <div><label class="field-label">Max HP</label><input id="createMaxHp" type="number" placeholder="0" /></div>
+            <div><label class="field-label" style="color:#a78bfa">Max Sanity</label><input id="createMaxSanity" type="number" placeholder="0" /></div>
+          </div>
+          <div><label class="field-label">Type &amp; Color</label>
+            <div class="row">
+              <select id="type"><option value="player">🛡️ Player</option><option value="enemy">⚔️ Enemy</option></select>
+              <input id="tokenColor" type="color" value="#6366f1" />
+            </div>
+          </div>
+
+          <div class="portrait-picker">
+            <div id="newPortraitPreview" class="portrait-preview">No portrait</div>
+            <div class="portrait-actions">
+              <div class="portrait-tag">Portrait for the token circle.</div>
+              <div class="row" style="gap:6px">
+                <button id="newPortraitBtn" class="btn-secondary btn-small" type="button" style="width:auto">Upload Portrait</button>
+                <button id="clearNewPortrait" class="portrait-clear btn-small" type="button" style="width:auto">Clear</button>
+              </div>
+              <input id="newPortraitFile" class="portrait-file" type="file" accept="image/*" />
+            </div>
+          </div>
+
+          <div><label class="field-label">Token Radius (px)</label><input id="tokenSize" type="number" value="15" /></div>
+          <button id="addBtn" class="btn-success">➕ Add Character</button>
+
+          <div class="panel-title" style="margin-top:4px">Wiki Templates</div>
+          <button id="importWikiBtn" class="btn-secondary">📥 Import Wiki Enemies</button>
+          <input type="file" id="wikiImportFile" class="wiki-import-file" accept=".json" />
+          <div id="wikiTemplateCount" class="small" style="text-align:center;min-height:16px"></div>
+
+          <div id="wikiDropField" class="wiki-drop-field" title="Drop an enemy from the wiki here to spawn it">
+            <div class="wiki-drop-title">Drop enemy here</div>
+            <div class="wiki-drop-note">Drag a monster card from the wiki and release it here to spawn it in combat.</div>
+          </div>
+
+          <div class="panel-title" style="margin-top:4px">Battlefield</div>
+          <div class="row">
+            <div><label class="field-label">Width (px)</label><input id="battleWidth" type="number" value="900" /></div>
+            <div><label class="field-label">Height (px)</label><input id="battleHeight" type="number" value="700" /></div>
+          </div>
+          <button id="setBattleSize" class="btn-secondary">Resize &amp; Sync Canvas</button>
+          <div><label class="field-label">Pixels per Unit</label><input id="cfgPixelsPerUnit" type="number" value="20" /></div>
+        </div>
+
+        <!-- COMBAT TAB -->
+        <div class="tab-content" id="tab-combat">
+          <div class="panel-title">HP — Selected Token</div>
+          <div id="selectedHpName"></div>
+          <div class="row">
+            <div><label class="field-label">Current HP</label><input id="currentHp" type="number" placeholder="—" /></div>
+            <div><label class="field-label">Max HP</label><input id="maxHpControl" type="number" placeholder="—" /></div>
+          </div>
+          <div class="row">
+            <button id="hpDecrease" class="btn-danger btn-small">− HP</button>
+            <button id="hpIncrease" class="btn-success btn-small">+ HP</button>
+            <button id="applyHp" class="btn-primary btn-small">✓ Apply</button>
+          </div>
+
+          <div class="panel-title" style="margin-top:4px;color:#a78bfa">Sanity — Selected Token</div>
+          <div id="selectedSanityName"></div>
+          <div class="row">
+            <div><label class="field-label" style="color:#a78bfa">Current Sanity</label><input id="currentSanity" type="number" placeholder="—" /></div>
+            <div><label class="field-label" style="color:#a78bfa">Max Sanity</label><input id="maxSanityControl" type="number" placeholder="—" /></div>
+          </div>
+          <div class="row">
+            <button id="sanityDecrease" class="btn-danger btn-small">− San</button>
+            <button id="sanityIncrease" class="btn-success btn-small">+ San</button>
+            <button id="applySanity" class="btn-primary btn-small">✓ Apply</button>
+          </div>
+
+          <div class="panel-title" style="margin-top:4px">Movement</div>
+          <div class="row">
+            <div><label class="field-label">Extra Move (units)</label><input id="moveRange" type="number" value="0" placeholder="0" /></div>
+            <button id="showMoveBtn" class="btn-secondary btn-small" style="align-self:flex-end">Show Range</button>
+          </div>
+          <label class="checkbox"><input id="moveConfigToggle" type="checkbox" /> Free movement (ignore range)</label>
+          <button id="undoMoveBtn" class="btn-secondary">↶ Undo Move <span style="opacity:.5;font-size:11px">(Ctrl+Z)</span></button>
+
+          <div class="panel-title" style="margin-top:4px">Custom Range Circle</div>
+          <div class="row">
+            <input id="manualCircleUnits" type="number" placeholder="60 units…" />
+            <button id="showManualCircle" class="btn-secondary btn-small" style="align-self:flex-end">Show</button>
+          </div>
+
+          <div class="panel-title" style="margin-top:4px">Measure Distance</div>
+          <div><label class="field-label">From</label><select id="distanceFrom"></select></div>
+          <div><label class="field-label">To</label><select id="distanceTo"></select></div>
+          <button id="checkDistance" class="btn-primary btn-small">📏 Calculate</button>
+          <div id="distanceResult"></div>
+        </div>
+
+        <!-- DICE TAB -->
+        <div class="tab-content" id="tab-dice">
+          <div class="panel-title">Dice Studio</div>
+          <label class="checkbox"><input id="diceRandomizeColor" type="checkbox" checked /> Randomize colors per roll</label>
+          <div class="dice-setting">
+            <div class="dice-setting-head">
+              <span>Color</span>
+              <span id="diceColorSwatchLabel" class="dice-setting-value">Randomized</span>
+            </div>
+            <div class="row" style="align-items:center">
+              <input id="diceColor" type="color" value="#f7f8fd" style="max-width:72px" />
+              <div class="dice-setting-note">Used when random colors are turned off. Pips/numbers stay auto-contrasted and readable.</div>
+            </div>
+          </div>
+
+          <div class="dice-settings-grid">
+            <div class="dice-setting">
+              <div class="dice-setting-head"><span>Size</span><span id="diceSizeVal" class="dice-setting-value">1.00×</span></div>
+              <input id="diceSize" type="range" min="0.6" max="2.5" step="0.05" value="1" />
+            </div>
+            <div class="dice-setting">
+              <div class="dice-setting-head"><span>Velocity</span><span id="diceVelocityVal" class="dice-setting-value">9.0</span></div>
+              <input id="diceVelocity" type="range" min="1" max="30" step="0.25" value="9" />
+            </div>
+            <div class="dice-setting">
+              <div class="dice-setting-head"><span>Angular momentum</span><span id="diceSpinVal" class="dice-setting-value">12.0</span></div>
+              <input id="diceSpin" type="range" min="1" max="40" step="0.25" value="12" />
+            </div>
+            <div class="dice-setting">
+              <div class="dice-setting-head"><span>Bounce-factor</span><span id="diceBounceVal" class="dice-setting-value">0.22</span></div>
+              <input id="diceBounce" type="range" min="0" max="1" step="0.01" value="0.22" />
+            </div>
+          </div>
+
+          <div class="small">These settings affect the next roll and are shared to guests by the host.</div>
+          <button id="diceResetSettings" class="btn-secondary btn-small">↺ Reset Dice Settings</button>
+          <button id="rollForAllGuestsBtn" class="btn-accent btn-small" style="margin-top:4px">📣 Prompt All Guests to Roll</button>
+        </div>
+
+        <!-- DRAW TAB -->
+        <div class="tab-content" id="tab-draw">
+          <div class="mode-indicator">✏️ Draw Mode Active</div>
+          <div id="freeMoveIndicator" class="mode-indicator" style="display:none;background:rgba(74,222,128,.12);color:#4ade80;border-color:rgba(74,222,128,.3)">🚚 Free Move Mode Active</div>
+          <div><label class="field-label">Tool</label>
+            <select id="drawTool">
+              <option value="freehand">✏️ Freehand</option>
+              <option value="circle">⭕ Circle</option>
+              <option value="rect">▢ Rectangle</option>
+            </select>
+          </div>
+          <label class="checkbox"><input id="fillShapesToggle" type="checkbox" /> Fill shapes</label>
+          <div><label class="field-label">Upload Map Image</label><input type="file" id="imageUpload" accept="image/png,image/jpeg,image/webp" /></div>
+          <div class="row">
+            <button id="cancelDraw" class="btn-secondary btn-small">❌ Cancel</button>
+            <button id="clearObjects" class="btn-danger btn-small">🗑 Clear All</button>
+            <button id="toggleFreeMoveBtn" class="btn-secondary btn-small">🚚 Move Tool</button>
+          </div>
+          <div style="padding:7px;background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.2);border-radius:6px">
+            <div class="small" style="margin-bottom:5px">Selected: <span id="selectedObjectLabel" style="color:var(--text)">None</span></div>
+            <div class="row">
+              <button id="deleteObject" class="btn-danger btn-small">Delete</button>
+              <button id="toggleDragObject" class="btn-secondary btn-small">Lock/Unlock</button>
+            </div>
+          </div>
+          <div style="padding:7px;background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.2);border-radius:6px">
+            <div class="panel-title" style="margin-bottom:5px">Guest Permissions</div>
+            <label class="checkbox"><input id="guestDrawToggle" type="checkbox" /> Allow guests to draw</label>
+            <label class="checkbox"><input id="guestDiceToggle" type="checkbox" /> Allow guests to roll dice freely</label>
+            <label class="checkbox"><input id="guestDiceThrowToggle" type="checkbox" /> Allow guests to move &amp; throw dice</label>
+          </div>
+          <div class="small">💡 <strong>Shift+drag</strong> multi-select · <strong>Shift+Wheel</strong> resize images</div>
+        </div>
+
+        <!-- NETWORK TAB -->
+        <div class="tab-content" id="tab-network">
+          <div class="panel-title">Move Approval</div>
+          <div><label class="field-label">Tolerance (units)</label><input id="cfgTolerance" type="number" step="0.05" value="0.25" /></div>
+          <label class="checkbox"><input id="cfgAutoApprove" type="checkbox" checked /> Auto-approve within tolerance</label>
+
+          <div class="panel-title" style="margin-top:4px">Player Assignments</div>
+          <div class="small">Assign tokens to guests.</div>
+          <div id="assignmentList"><div class="small">No guests connected yet.</div></div>
+          <button id="saveAssignments" class="btn-primary btn-small">💾 Save Assignments</button>
+
+          <div class="panel-title" style="margin-top:4px">Pending Move Requests</div>
+          <div id="pendingList"><div class="small">No pending requests.</div></div>
+
+          <div class="panel-title" style="margin-top:4px">Connected Guests</div>
+          <div id="guestList" class="small">None yet.</div>
+
+          <div class="small" style="margin-top:4px">
+            📋 Share links:<br>
+            <span style="color:var(--accent2)">?mode=host</span> — DM<br>
+            <span style="color:#818cf8">?mode=guest&amp;name=Alice</span> — Player
+          </div>
+        </div>
+      </div>
+      <div class="small" style="text-align:center;opacity:.5">[C] Combat · [D] Draw · [S] Setup</div>
+    </div>
+
+    <!-- GUEST CONTROLS -->
+    <div id="guestControls" style="display:none;flex-direction:column;gap:10px">
+      <div class="panel">
+        <div class="panel-title">Your Token</div>
+        <div id="guestSelectedInfo" class="small">Click your assigned token to select it.</div>
+        <div id="guestTargetInfo">No target — click map to place one.</div>
+        <div><label class="field-label">Extra Move (units)</label><input id="guestExtra" type="number" value="0" placeholder="0" /></div>
+        <button id="guestRequestMove" class="btn-accent">🏃 Request Move</button>
+        <button id="guestClearTarget" class="btn-secondary btn-small">✕ Clear Target</button>
+        <div id="guestMoveStatus" class="small" style="text-align:center;min-height:18px"></div>
+      </div>
+      <div class="panel" id="guestDrawPanel">
+        <div class="panel-title">Draw</div>
+        <div class="mode-indicator">✏️ Drawing Enabled by DM</div>
+        <div><label class="field-label">Tool</label>
+          <select id="guestDrawTool">
+            <option value="freehand">✏️ Freehand</option>
+            <option value="circle">⭕ Circle</option>
+            <option value="rect">▢ Rectangle</option>
+          </select>
+        </div>
+        <label class="checkbox"><input id="guestFillToggle" type="checkbox" /> Fill shapes</label>
+        <button id="guestCancelDraw" class="btn-secondary btn-small">❌ Cancel drawing</button>
+        <button id="guestClearMyDrawings" class="btn-danger btn-small">🗑 Clear my drawings</button>
+        <div class="small">💡 Right-click to measure · Double-click any token to ping</div>
+      </div>
+      <div class="panel" id="guestDiceRequestPanel">
+        <div class="panel-title">🎲 Dice Request</div>
+        <div id="guestDiceRequestNote" class="small">Guests request rolls here; the DM approves them from the pending list.</div>
+        <div class="dice-expr-row">
+          <input id="guestDiceExpr" placeholder="1d20…" />
+          <button id="guestRequestDice" class="btn-accent btn-small">📩 Request</button>
+        </div>
+        <div id="guestDiceStatus" class="small" style="text-align:center;min-height:18px"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Enemy Nicknames</div>
+        <div class="small">Right-click an enemy token to set a nickname.</div>
+        <div id="localNickList"></div>
+      </div>
+    </div>
+
+    <!-- DICE ROLLER (always visible) -->
+    <div class="panel" id="dice-panel">
+      <div class="panel-title">🎲 Dice Roller</div>
+      <div class="dice-quick-btns">
+        <button class="dice-qbtn" data-expr="1d4">D4</button>
+        <button class="dice-qbtn" data-expr="1d6">D6</button>
+        <button class="dice-qbtn" data-expr="1d8">D8</button>
+        <button class="dice-qbtn" data-expr="1d10">D10</button>
+        <button class="dice-qbtn" data-expr="1d12">D12</button>
+        <button class="dice-qbtn d20" data-expr="1d20">D20</button>
+      </div>
+      <div class="dice-expr-row">
+        <input id="diceExpr" placeholder="2d6+3…" />
+        <button id="rollDiceBtn" class="btn-primary btn-small">🎲 Roll</button>
+      </div>
+      <div id="diceResult"></div>
+      <button id="clearDiceBtn" class="btn-secondary btn-small" style="opacity:.55;font-size:11px">✕ Clear dice from table</button>
+    </div>
+  </div>
+</div>
+
+<!-- CANVAS -->
+<div id="battle-wrap">
+  <div id="canvas-container">
+    <canvas id="battlefield" width="900" height="700"></canvas>
+    <canvas id="dice-canvas"></canvas>
+  </div>
+</div>
+
+<!-- RIGHT INITIATIVE SIDEBAR -->
+<div id="right-sidebar">
+  <div id="rs-header">
+    <h2>⚡ Initiative</h2>
+    <button id="rs-sort-btn" class="sort-toggle-btn" title="Toggle sort order" style="display:none">A–Z</button>
+    <button id="rs-toggle-btn" title="Collapse/Expand">‹</button>
+  </div>
+  <div id="rs-body">
+    <div id="rs-options">
+      <!-- Combat flow buttons (host only) -->
+      <div id="rs-combat-flow">
+        <button id="startBtn" class="btn-success btn-small" style="flex:1">▶ Start</button>
+        <button id="nextBtn" class="btn-secondary btn-small" style="flex:1">⏭ Next</button>
+      </div>
+      <!-- Sort order label (host only) -->
+      <div id="guestInitToggleWrap" style="font-size:11px;display:none;align-items:center;gap:6px;color:var(--text-muted)">
+        <span>Player view:</span>
+        <span id="sortOrderLabel" style="color:var(--accent2);font-weight:600">Initiative order</span>
+      </div>
+    </div>
+    <div id="initiativeOrderRight"></div>
+  </div>
+  <div id="rs-collapsed-label">⚡ INITIATIVE</div>
+</div>
+
+<!-- EDIT MODAL -->
+<div id="editModal">
+  <div id="editModalBox">
+    <div class="panel-title">Edit Participant</div>
+    <div class="row">
+      <div><label class="field-label">Name</label><input id="editName" /></div>
+      <div><label class="field-label">Type</label>
+        <select id="editType"><option value="player">🛡 Player</option><option value="enemy">⚔ Enemy</option></select>
+      </div>
+    </div>
+    <div class="row">
+      <div><label class="field-label">Initiative</label><input id="editInit" type="number" /></div>
+      <div><label class="field-label">Speed</label><input id="editSpeed" type="number" /></div>
+      <div><label class="field-label">Radius</label><input id="editRadius" type="number" /></div>
+    </div>
+    <div class="row">
+      <div><label class="field-label">Max HP</label><input id="editMaxHp" type="number" /></div>
+      <div><label class="field-label">Current HP</label><input id="editHp" type="number" /></div>
+      <div><label class="field-label">Color</label><input id="editColor" type="color" /></div>
+    </div>
+    <div class="row">
+      <div><label class="field-label" style="color:#a78bfa">Max Sanity</label><input id="editMaxSanity" type="number" /></div>
+      <div><label class="field-label" style="color:#a78bfa">Current Sanity</label><input id="editSanity" type="number" /></div>
+    </div>
+    <div class="portrait-picker" style="margin-top:2px">
+      <div id="editPortraitPreview" class="portrait-preview">No portrait</div>
+      <div class="portrait-actions">
+        <div class="portrait-tag">Use a different image or clear the portrait.</div>
+        <div class="row" style="gap:6px">
+          <button id="editPortraitBtn" class="btn-secondary btn-small" type="button" style="width:auto">Upload Portrait</button>
+          <button id="clearEditPortrait" class="portrait-clear btn-small" type="button" style="width:auto">Clear</button>
+        </div>
+        <input id="editPortraitFile" class="portrait-file" type="file" accept="image/*" />
+      </div>
+    </div>
+    <div class="row" style="margin-top:4px">
+      <button id="editSave" class="btn-success">✓ Save</button>
+      <button id="editCancel" class="btn-secondary">✕ Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- PORTRAIT EDITOR MODAL -->
+<div id="portraitEditorModal" class="portrait-editor-modal">
+  <div class="portrait-editor-box">
+    <div class="portrait-editor-head">
+      <h3>Adjust Portrait</h3>
+      <button id="portraitEditorClose" class="portrait-editor-close" type="button">✕</button>
+    </div>
+    <div class="portrait-editor-body">
+      <div class="portrait-stage">
+        <canvas id="portraitEditorCanvas" width="360" height="360"></canvas>
+        <div class="portrait-guide"></div>
+      </div>
+      <div class="portrait-tools">
+        <div class="small">
+          Drag the image to position it. Use the sliders to zoom and shift until the face sits correctly inside the circle.
+        </div>
+        <div class="portrait-slider">
+          <label for="portraitZoom">Zoom</label>
+          <input id="portraitZoom" type="range" min="0.25" max="4" step="0.01" value="1" />
+        </div>
+        <div class="portrait-slider">
+          <label for="portraitOffsetX">Horizontal shift</label>
+          <input id="portraitOffsetX" type="range" min="-400" max="400" step="1" value="0" />
+        </div>
+        <div class="portrait-slider">
+          <label for="portraitOffsetY">Vertical shift</label>
+          <input id="portraitOffsetY" type="range" min="-400" max="400" step="1" value="0" />
+        </div>
+        <div class="portrait-note">Confirming will save the framed image to the character portrait.</div>
+        <div class="portrait-editor-actions">
+          <button id="portraitConfirm" class="btn-success" type="button">Use Portrait</button>
+          <button id="portraitCancel" class="btn-secondary" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ITEM CONTEXT MENU -->
+<div id="itemContextMenu">
+  <div class="ctx-header">
+    <div class="ctx-dot" id="ctxDot"></div>
+    <span id="ctxName">—</span>
+  </div>
+  <div class="ctx-section-label">Items</div>
+  <div id="ctxItemList"></div>
+  <div class="ctx-divider"></div>
+  <div id="ctxActions"></div>
+</div>
+
+<!-- CANVAS EMPTY-SPACE CONTEXT MENU (host only) -->
+<div id="canvasCtxMenu" style="display:none;position:fixed;z-index:998;background:var(--surface);border:1px solid var(--border);border-radius:10px;min-width:185px;box-shadow:0 8px 36px rgba(0,0,0,.75);padding:6px 0">
+  <div style="padding:6px 13px 5px;font-family:'Cinzel',serif;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid var(--border);margin-bottom:3px">Spawn Entity</div>
+  <div id="canvasCtxNewEntity" class="ctx-action" style="color:var(--text)"><span class="ctx-item-icon">🧙</span><span>Create New Entity…</span></div>
+  <div id="canvasCtxQuickPlayer" class="ctx-action" style="color:var(--text)"><span class="ctx-item-icon">🛡</span><span>Quick Player <span style="opacity:.55;font-size:11px">(5 in all)</span></span></div>
+  <div id="canvasCtxQuickEnemy" class="ctx-action" style="color:var(--text)"><span class="ctx-item-icon">⚔</span><span>Quick Enemy <span style="opacity:.55;font-size:11px">(5 in all)</span></span></div>
+  <div class="ctx-divider"></div>
+  <div id="canvasCtxFromTemplate" class="ctx-action" style="color:var(--text)"><span class="ctx-item-icon">📖</span><span>Spawn from Wiki Template</span></div>
+</div>
+
+<!-- ITEM VIEWER MODAL -->
+<div id="itemViewerModal">
+  <div id="itemViewerBox">
+    <div id="itemViewerHeader">
+      <div id="itemViewerTitleWrap">
+        <div id="itemViewerTitle">—</div>
+        <div id="itemViewerOwner">—</div>
+      </div>
+      <button id="itemViewerClose">✕</button>
+    </div>
+    <div id="itemViewerBody"></div>
+  </div>
+</div>
+
+<!-- ENEMY DETAILS MODAL (host only) -->
+<div id="enemyDetailsModal">
+  <div id="enemyDetailsBox">
+    <div id="enemyDetailsHeader">
+      <div id="enemyDetailsTitleWrap">
+        <div id="enemyDetailsTitle">—</div>
+        <div id="enemyDetailsSubtitle">—</div>
+      </div>
+      <button id="enemyDetailsClose">✕</button>
+    </div>
+    <div id="enemyDetailsBody"></div>
+  </div>
+</div>
+
+<!-- WIKI TEMPLATE SELECTOR MODAL -->
+<div id="wikiTemplateSelector">
+  <div id="wikiTemplateSelectorBox">
+    <div id="wikiTemplateSelectorHeader">
+      <h3>📖 Select Enemy Template</h3>
+      <button id="wikiTemplateSelectorClose">✕</button>
+    </div>
+    <div id="wikiTemplateList"></div>
+  </div>
+</div>
+
+<script defer src="js/app.js"></script>
+
+<!-- PING OVERLAY -->
+<div id="ping-overlay">
+  <canvas id="ping-canvas"></canvas>
+</div>
+<!-- REMINDER TOASTS -->
+<div id="reminder-toasts"></div>
+
+<script type="module" src="js/dice-physics.js"></script>
+
+</body>
+</html>

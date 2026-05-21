@@ -1317,8 +1317,10 @@ if(isHost){
     if(n!=='draw'&&hostFreeMoveMode){
       hostFreeMoveMode=false;draggingParticipantRef=null;
       const tmBtn=document.getElementById('toggleFreeMoveBtn');
+      const globalBtn=document.getElementById('globalMoveToolBtn');
       const tmInd=document.getElementById('freeMoveIndicator');
       if(tmBtn){tmBtn.textContent='🚚 Move Tool';tmBtn.style.background='';tmBtn.style.color='';}
+      if(globalBtn){globalBtn.textContent='🚚 Move Tool (Always Available)';globalBtn.classList.remove('active');}
       if(tmInd)tmInd.style.display='none';
     }
     drawAll();
@@ -1462,16 +1464,42 @@ if(isHost){
 
   // Free Move Tool toggle
   const toggleFreeMoveBtn=document.getElementById('toggleFreeMoveBtn');
+  const globalMoveToolBtn=document.getElementById('globalMoveToolBtn');
   const freeMoveIndicator=document.getElementById('freeMoveIndicator');
-  toggleFreeMoveBtn.addEventListener('click',()=>{
-    hostFreeMoveMode=!hostFreeMoveMode;
+  let ctrlComboUsed=false;
+  function renderMoveToolState(){
     toggleFreeMoveBtn.textContent=hostFreeMoveMode?'🚫 Exit Move':'🚚 Move Tool';
     toggleFreeMoveBtn.style.background=hostFreeMoveMode?'rgba(74,222,128,.15)':'';
     toggleFreeMoveBtn.style.color=hostFreeMoveMode?'#4ade80':'';
+    if(globalMoveToolBtn){
+      globalMoveToolBtn.textContent=hostFreeMoveMode?'🚫 Exit Move Tool':'🚚 Move Tool (Always Available)';
+      globalMoveToolBtn.classList.toggle('active',hostFreeMoveMode);
+    }
     freeMoveIndicator.style.display=hostFreeMoveMode?'block':'none';
+  }
+  function toggleMoveTool(){
+    hostFreeMoveMode=!hostFreeMoveMode;
     if(hostFreeMoveMode){drawMode=false;isDrawing=false;currentDrawing=null;}
+    renderMoveToolState();
     drawAll();
+  }
+  toggleFreeMoveBtn.addEventListener('click',toggleMoveTool);
+  globalMoveToolBtn?.addEventListener('click',toggleMoveTool);
+  window.addEventListener('keydown',e=>{
+    if(e.key==='Control'&&!e.repeat){
+      ctrlComboUsed=false;
+      return;
+    }
+    if(e.ctrlKey&&e.key!=='Control')ctrlComboUsed=true;
   });
+  window.addEventListener('keyup',e=>{
+    if(e.key!=='Control')return;
+    const t=document.activeElement?.tagName;
+    if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA')return;
+    if(!ctrlComboUsed)toggleMoveTool();
+    ctrlComboUsed=false;
+  });
+  renderMoveToolState();
   // (sort order is now managed by rs-sort-btn)
 
   imageUpload.addEventListener('change',e=>{

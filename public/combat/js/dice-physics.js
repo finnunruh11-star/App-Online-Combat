@@ -490,6 +490,15 @@ class CombatDiceRoller{
     this._pendingSharedResult=null;
     this._rollMeta={rollId:null,expression:null,seed:null,shared:false};
     if(window.__isHost) lastDicePrompt=null;
+    this._removeAllDice();
+    const r=document.getElementById('diceResult');
+    if(r){r.className='';r.innerHTML='';}
+    if(opts.broadcast&&window.__isHost&&window.__broadcastAppMessage){
+      window.__broadcastAppMessage({type:'dice_clear',source:'host'});
+    }
+  }
+
+  _removeAllDice(){
     for(const d of this._dice){
       this.scene.remove(d.mesh);
       this.world.removeBody(d.body);
@@ -497,11 +506,6 @@ class CombatDiceRoller{
     this._dice=[];
     for(const sprite of this._labelSprites.values())this.scene.remove(sprite);
     this._labelSprites.clear();
-    const r=document.getElementById('diceResult');
-    if(r){r.className='';r.innerHTML='';}
-    if(opts.broadcast&&window.__isHost&&window.__broadcastAppMessage){
-      window.__broadcastAppMessage({type:'dice_clear',source:'host'});
-    }
   }
 
   _setRngSeed(seed){
@@ -514,6 +518,7 @@ class CombatDiceRoller{
     const expression=String(payload?.expression||'1d20').trim()||'1d20';
     const rollId=payload?.rollId||makeDiceRequestId();
     const seed=payload?.seed!==undefined ? (payload.seed>>>0) : hashStringToSeed(`${rollId}|${expression}`);
+    if(payload?.diceSettings) this.applySettings(payload.diceSettings);
     this._pendingSharedResult=null;
     this._rollMeta={rollId,expression,seed,shared:true};
     this._setRngSeed(seed);
@@ -528,6 +533,7 @@ class CombatDiceRoller{
       seed:this._rollMeta?.seed??null,
       shared:!!this._rollMeta?.shared,
       thrower:this._rollMeta?.thrower||null,
+      diceSettings:this.getSettings(),
       rolling:!!this._rolling,
       mod:Number.isFinite(this._lastMod)?this._lastMod:null,
       results:this._pendingSharedResult?.results||null,
@@ -536,6 +542,8 @@ class CombatDiceRoller{
         idx,
         sides:d.sides,
         sign:d.sign,
+        thrower:d.thrower||null,
+        scale:Number.isFinite(d.mesh?.scale?.x)?d.mesh.scale.x:1,
         position:{x:d.body.position.x,y:d.body.position.y,z:d.body.position.z},
         quaternion:{x:d.body.quaternion.x,y:d.body.quaternion.y,z:d.body.quaternion.z,w:d.body.quaternion.w},
         velocity:{x:d.body.velocity.x,y:d.body.velocity.y,z:d.body.velocity.z},
@@ -548,6 +556,7 @@ class CombatDiceRoller{
   applySharedState(snapshot){
     if(!snapshot)return;
     if(this._rollMeta.rollId && snapshot.rollId && snapshot.rollId!==this._rollMeta.rollId)return;
+    if(snapshot.diceSettings) this.applySettings(snapshot.diceSettings);
     if(snapshot.rollId && !this._rollMeta.rollId){
       this._rollMeta.rollId=snapshot.rollId;
       this._rollMeta.expression=snapshot.expression||this._rollMeta.expression||null;
@@ -555,7 +564,20 @@ class CombatDiceRoller{
       this._rollMeta.shared=!!snapshot.shared;
     }
     const diceState=Array.isArray(snapshot.dice)?snapshot.dice:null;
-    if(!diceState||!this._dice.length)return;
+    if(!diceState)return;
+    const needsRebuild=
+      this._dice.length!==diceState.length ||
+      diceState.some((snap,idx)=>{
+        const d=this._dice[idx];
+        return !d || d.sides!==snap.sides || (d.sign??1)!==(snap.sign??1);
+      });
+    if(needsRebuild){
+      this._removeAllDice();
+      for(const snap of diceState){
+        this._spawnReplicatedDie(snap);
+      }
+    }
+    if(!this._dice.length)return;
     for(const snap of diceState){
       const d=this._dice[snap.idx];
       if(!d)continue;
@@ -566,6 +588,28 @@ class CombatDiceRoller{
       if(snap.sleeping&&typeof d.body.sleep==='function') d.body.sleep();
       else if(typeof d.body.wakeUp==='function') d.body.wakeUp();
     }
+  }
+
+  _spawnReplicatedDie(snap={}){
+    const sides=Number.isFinite(snap.sides)?snap.sides:20;
+    const sign=Number.isFinite(snap.sign)?snap.sign:1;
+    const thrower=snap.thrower||null;
+    const rand=Math.random;
+    const colors=this.settings.randomizeColors ? getRandomDieColors(rand) : getFixedDieColors(this.settings.diceColor,rand);
+    const mesh=createDieVisual(sides,{...this.settings,...colors});
+    const scale=Math.max(0.6,Math.min(2.5,parseFloat(snap.scale)||this.settings.dieScale||1));
+    if(mesh.scale?.setScalar) mesh.scale.setScalar(scale);
+    const body=new CANNON.Body({mass:0});
+    body.type=CANNON.Body.KINEMATIC;
+    body.velocity.set(0,0,0);
+    body.angularVelocity.set(0,0,0);
+    body.linearDamping=1;
+    body.angularDamping=1;
+    body.allowSleep=false;
+    body.addShape(physicsShape(sides,mesh));
+    this.scene.add(mesh);
+    this.world.addBody(body);
+    this._dice.push({sides,mesh,body,sign,thrower});
   }
 
   _broadcastRollingState(){
@@ -583,6 +627,7 @@ class CombatDiceRoller{
     const total=Number.isFinite(payload.total)?payload.total:null;
     this._pendingSharedResult={...payload,results,total};
     if(payload.diceState) this.applySharedState(payload.diceState);
+    if(Array.isArray(payload.results)||Number.isFinite(payload.total)) this._rolling=false;
     if(!this._rolling) this._renderSharedResult(payload);
   }
 
@@ -671,11 +716,25 @@ class CombatDiceRoller{
     const vy=4+speed*clamp*0.2;
     d.body.velocity.set(vx,vy,vz);
     const sp=this.settings.launchSpin;
-    const rand=this._rng||Math.random;
+    const rand=Math.random; // Use true randomness for throws (no seed reuse)
     d.body.angularVelocity.set((rand()-0.5)*sp,(rand()-0.5)*sp,(rand()-0.5)*sp);
     d.body.wakeUp?.();
     this._draggedDieIdx=null;
     this._dragCurWorld=null;this._dragPrevWorld=null;
+
+    // Assign a fresh rollId so this throw is treated as a new roll
+    const freshRollId=crypto?.randomUUID?.() || `throw-${Date.now().toString(36)}`;
+    this._rollMeta.rollId=freshRollId;
+    this._rollMeta.seed=null;
+    this._rollMeta.shared=true;
+    this._pendingSharedResult=null;
+    this._setRngSeed(null); // Unseed RNG so result reading is not deterministic
+
+    // Broadcast roll start to guests so they see the throw
+    if(window.__isHost && window.__broadcastAppMessage){
+      window.__broadcastAppMessage({type:'dice_roll_start',...this._rollMeta,diceSettings:this.getSettings(),source:'host'});
+    }
+
     // Restart settle poller so die reads new value
     this._settleFrames=0;
     this._rolling=true;
@@ -686,6 +745,8 @@ class CombatDiceRoller{
     const expr=this._rollMeta.expression||'thrown';
     this._poller=setInterval(()=>{
       if(!this._rolling){clearInterval(this._poller);this._poller=null;return;}
+      // Broadcast physics state to guests during throw settle
+      if(window.__isHost) this._broadcastRollingState();
       const still=this._dice.every(di=>di.body.velocity.lengthSquared()<0.01&&di.body.angularVelocity.lengthSquared()<0.01);
       this._settleFrames=still?this._settleFrames+1:0;
       if(this._settleFrames>28||this._dice.every(di=>di.body.sleepState===CANNON.Body.SLEEPING)){
@@ -724,7 +785,11 @@ class CombatDiceRoller{
   }
 
   roll(expression,opts={}){
-    if(this._rolling)return;
+    const passive=!!opts.passive || !window.__isHost;
+    if(this._rolling){
+      if(passive)this.clearDice();
+      else return;
+    }
     this._rolling=true;
     const r=document.getElementById('diceResult');
     if(r){r.className='rolling';r.textContent='🎲 Rolling…';}
@@ -735,9 +800,8 @@ class CombatDiceRoller{
     if(resultEl){resultEl.className='rolling';resultEl.textContent='🎲 Rolling…';}
     this._rollMeta={rollId:opts.rollId||this._rollMeta.rollId||null,expression,seed:opts.seed??this._rollMeta.seed??null,shared:!!opts.shared,thrower:opts.thrower||null};
     this._setRngSeed(this._rollMeta.seed);
-    const passive=!!opts.passive || !window.__isHost;
     if(window.__isHost && opts.broadcast!==false && window.__broadcastAppMessage){
-      window.__broadcastAppMessage({type:'dice_roll_start',...this._rollMeta,source:'host'});
+      window.__broadcastAppMessage({type:'dice_roll_start',...this._rollMeta,diceSettings:this.getSettings(),source:'host'});
       syncToServer();
     }
     let idx=0;const total=dice.reduce((s,d)=>s+d.count,0);

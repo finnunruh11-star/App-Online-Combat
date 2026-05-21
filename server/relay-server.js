@@ -21,6 +21,7 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = Number(process.env.PORT || 3000);
 const DEFAULT_ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 1000 * 60 * 60 * 24);
+const MAX_CHARGES = 10;
 
 const rooms = new Map();
 
@@ -99,6 +100,12 @@ function isAssignedTo(participant, guestName) {
   return participant.assignedTo === guestName;
 }
 
+function clampCharge(value) {
+  const n = Number.parseInt(value, 10);
+  if (Number.isNaN(n)) return 0;
+  return Math.max(0, Math.min(MAX_CHARGES, n));
+}
+
 function roomSnapshot(room) {
   return {
     code: room.code,
@@ -127,6 +134,10 @@ function maskStateForGuest(room, guestName) {
       speed: p.speed || 0,
       hp: p.type === 'player' ? p.hp : undefined,
       maxHp: p.type === 'player' ? p.maxHp : undefined,
+      charges: p.type === 'player' ? clampCharge(p.charges) : undefined,
+      maxCharges: p.type === 'player' ? MAX_CHARGES : undefined,
+      chargesTurnStartAdd: p.type === 'player' ? clampCharge(p.chargesTurnStartAdd) : undefined,
+      chargesTurnEndAdd: p.type === 'player' ? clampCharge(p.chargesTurnEndAdd) : undefined,
       assignedTo: p.assignedTo || null,
       pingUntil: p.pingUntil || null,
     })),
@@ -361,6 +372,53 @@ wss.on('connection', ws => {
         return;
       }
 
+      if (msg.type === 'charge_announce') {
+        const text = String(msg.text || '').trim();
+        if (!text) return;
+        if (ws.mode === 'host') {
+          broadcastToGuests(room, { type: 'charge_announce', text });
+        } else {
+          sendToHost(room, { type: 'charge_announce', text });
+          broadcastToGuests(room, { type: 'charge_announce', text });
+        }
+        return;
+      }
+
+      if (msg.type === 'guest_charge_update' && ws.mode === 'guest') {
+        const p = room.state.participants.find(pp => pp.id === msg.participantId);
+        if (!p || p.type !== 'player') {
+          ws.send(JSON.stringify({ type: 'guest_charge_update_result', ok: false, reason: 'participant_not_found' }));
+          return;
+        }
+        if (p.assignedTo && !isAssignedTo(p, ws.name)) {
+          ws.send(JSON.stringify({ type: 'guest_charge_update_result', ok: false, reason: 'not_your_token' }));
+          return;
+        }
+        const delta = Number.parseInt(msg.delta, 10);
+        if (Number.isNaN(delta) || delta === 0) {
+          ws.send(JSON.stringify({ type: 'guest_charge_update_result', ok: false, reason: 'bad_delta' }));
+          return;
+        }
+
+        const before = clampCharge(p.charges);
+        const after = clampCharge(before + delta);
+        p.maxCharges = MAX_CHARGES;
+        p.charges = after;
+        p.chargesTurnStartAdd = clampCharge(p.chargesTurnStartAdd);
+        p.chargesTurnEndAdd = clampCharge(p.chargesTurnEndAdd);
+
+        broadcastGuestState(room);
+        sendToHost(room, { type: 'state_echo', state: room.state });
+        ws.send(JSON.stringify({ type: 'guest_charge_update_result', ok: true, before, after }));
+
+        if (msg.announce !== false && before !== after) {
+          const text = `${p.name}: charges ${before} → ${after} (player update)`;
+          broadcastToGuests(room, { type: 'charge_announce', text });
+          sendToHost(room, { type: 'charge_announce', text });
+        }
+        return;
+      }
+
       if (msg.type === 'request_move' && ws.mode === 'guest') {
         const p = room.state.participants.find(pp => pp.id === msg.participantId);
         if (!p) {
@@ -420,9 +478,23 @@ wss.on('connection', ws => {
       }
 
       if (msg.type === 'approve_request' && ws.mode === 'host') {
-        const idx = room.pendingRequests.findIndex(r => r.id === msg.requestId);
-        if (idx === -1) return;
+        const requestId = msg.requestId || msg.id || null;
+        const idx = room.pendingRequests.findIndex(r => (r.id || r.requestId) === requestId);
+        if (idx === -1) {
+          console.warn('[relay] approve_request not found', {
+            room: room.code,
+            requestId,
+            pendingIds: room.pendingRequests.map(r => r.id || r.requestId || null),
+          });
+          return;
+        }
         const req = room.pendingRequests.splice(idx, 1)[0];
+        console.info('[relay] approve_request resolved', {
+          room: room.code,
+          requestId: req.id || req.requestId || requestId,
+          approve: !!msg.approve,
+          kind: req.requestType || req.kind || 'move',
+        });
         if (msg.approve) {
           const p = room.state.participants.find(pp => pp.id === req.participantId);
           if (p) {
@@ -464,6 +536,12 @@ if (msg.type === 'dice_roll_prompt' && ws.mode === 'host') {
           guestName: ws.name || 'Guest',
           timestamp: Date.now(),
         };
+        console.info('[relay] dice_request queued', {
+          room: room.code,
+          requestId: request.id || request.requestId || null,
+          guest: request.fromGuestName || request.guestName || ws.name || 'Guest',
+          expression: request.expression || '1d20',
+        });
         room.pendingRequests = room.pendingRequests.filter(r => r.id !== request.id).concat(request);
         sendToHost(room, { type: 'dice_request', request });
         sendToHost(room, { type: 'pending_requests_update', requests: room.pendingRequests });
@@ -471,8 +549,17 @@ if (msg.type === 'dice_roll_prompt' && ws.mode === 'host') {
       }
 
       if (msg.type === 'dice_request_status' && ws.mode === 'host') {
-        room.pendingRequests = room.pendingRequests.filter(r => r.id !== msg.requestId);
-        broadcastToGuests(room, { type: 'dice_request_status', requestId: msg.requestId, approved: !!msg.approved, rollId: msg.rollId, reason: msg.reason || null });
+        const requestId = msg.requestId || msg.id || null;
+        if (requestId) {
+          room.pendingRequests = room.pendingRequests.filter(r => (r.id || r.requestId) !== requestId);
+        }
+        console.info('[relay] dice_request_status', {
+          room: room.code,
+          requestId,
+          approved: !!msg.approved,
+          rollId: msg.rollId || null,
+        });
+        broadcastToGuests(room, { type: 'dice_request_status', requestId, approved: !!msg.approved, rollId: msg.rollId, reason: msg.reason || null });
         sendToHost(room, { type: 'pending_requests_update', requests: room.pendingRequests });
         return;
       }

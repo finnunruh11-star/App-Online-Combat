@@ -109,6 +109,8 @@ const selectedHpNameEl=document.getElementById('selectedHpName');
 const currentSanityEl=document.getElementById('currentSanity'), maxSanityControlEl=document.getElementById('maxSanityControl');
 const sanityDecreaseBtn=document.getElementById('sanityDecrease'), sanityIncreaseBtn=document.getElementById('sanityIncrease'), applySanityBtn=document.getElementById('applySanity');
 const selectedSanityNameEl=document.getElementById('selectedSanityName');
+const currentChargesEl=document.getElementById('currentCharges'), chargeStartGainEl=document.getElementById('chargeStartGain'), chargeEndGainEl=document.getElementById('chargeEndGain');
+const chargesDecreaseBtn=document.getElementById('chargesDecrease'), chargesIncreaseBtn=document.getElementById('chargesIncrease'), applyChargesBtn=document.getElementById('applyCharges'), announceChargesBtn=document.getElementById('announceCharges');
 const drawToolSelect=document.getElementById('drawTool'), fillShapesToggle=document.getElementById('fillShapesToggle');
 const cancelDrawBtn=document.getElementById('cancelDraw'), clearObjectsBtn=document.getElementById('clearObjects');
 const selectedObjectLabel=document.getElementById('selectedObjectLabel'), deleteObjectBtn=document.getElementById('deleteObject'), toggleDragObjectBtn=document.getElementById('toggleDragObject');
@@ -125,6 +127,8 @@ const cfgPixelsPerUnit=document.getElementById('cfgPixelsPerUnit'), cfgTolerance
 const pendingList=document.getElementById('pendingList'), guestListEl=document.getElementById('guestList'), assignmentList=document.getElementById('assignmentList'), saveAssignmentsBtn=document.getElementById('saveAssignments');
 const guestSelectedInfo=document.getElementById('guestSelectedInfo'), guestTargetInfo=document.getElementById('guestTargetInfo');
 const guestExtraEl=document.getElementById('guestExtra'), guestRequestMoveBtn=document.getElementById('guestRequestMove'), guestClearTargetBtn=document.getElementById('guestClearTarget'), guestMoveStatus=document.getElementById('guestMoveStatus');
+const guestChargesDecreaseBtn=document.getElementById('guestChargesDecrease'), guestChargesIncreaseBtn=document.getElementById('guestChargesIncrease');
+const guestChargeAnnounceToggle=document.getElementById('guestChargeAnnounceToggle'), guestChargeStatusEl=document.getElementById('guestChargeStatus');
 const diceRandomizeColorEl=document.getElementById('diceRandomizeColor'), diceColorEl=document.getElementById('diceColor');
 const diceSizeEl=document.getElementById('diceSize'), diceVelocityEl=document.getElementById('diceVelocity'), diceSpinEl=document.getElementById('diceSpin'), diceBounceEl=document.getElementById('diceBounce');
 const diceSizeValEl=document.getElementById('diceSizeVal'), diceVelocityValEl=document.getElementById('diceVelocityVal'), diceSpinValEl=document.getElementById('diceSpinVal'), diceBounceValEl=document.getElementById('diceBounceVal');
@@ -132,6 +136,105 @@ const diceColorSwatchLabelEl=document.getElementById('diceColorSwatchLabel'), di
 const localNickList=document.getElementById('localNickList'), guestDrawPanel=document.getElementById('guestDrawPanel');
 const guestDrawToolEl=document.getElementById('guestDrawTool'), guestFillToggle=document.getElementById('guestFillToggle');
 const guestCancelDrawBtn=document.getElementById('guestCancelDraw'), guestClearMyDrawingsBtn=document.getElementById('guestClearMyDrawings');
+
+/* ================================================================
+   UI DIALOGS — Electron-compatible replacements for alert/confirm/prompt
+================================================================ */
+function showAlert(msg){
+  const el=document.getElementById('uiFlash');
+  el.textContent=msg;el.style.display='block';el.style.opacity='1';
+  clearTimeout(el._t);
+  el._t=setTimeout(()=>{el.style.opacity='0';setTimeout(()=>{el.style.display='none';},260);},3500);
+}
+const MAX_CHARGES=10;
+function clampChargeValue(v){
+  const n=parseInt(v);
+  if(isNaN(n))return 0;
+  return Math.max(0,Math.min(MAX_CHARGES,n));
+}
+function clampChargeGain(v){
+  const n=parseInt(v);
+  if(isNaN(n))return 0;
+  return Math.max(0,Math.min(MAX_CHARGES,n));
+}
+function ensureParticipantChargeFields(p){
+  if(!p)return p;
+  p.maxCharges=MAX_CHARGES;
+  p.charges=clampChargeValue(p.charges);
+  p.chargesTurnStartAdd=clampChargeGain(p.chargesTurnStartAdd);
+  p.chargesTurnEndAdd=clampChargeGain(p.chargesTurnEndAdd);
+  return p;
+}
+function announceCharge(text){
+  if(!text)return;
+  showAlert(`📣 ${text}`);
+  send({type:'charge_announce',text});
+}
+function setGuestChargeStatus(msg,type='info'){
+  if(!guestChargeStatusEl)return;
+  guestChargeStatusEl.textContent=msg;
+  if(type==='warn')guestChargeStatusEl.style.color='var(--accent2)';
+  else if(type==='error')guestChargeStatusEl.style.color='var(--danger)';
+  else if(type==='ok')guestChargeStatusEl.style.color='var(--success)';
+  else guestChargeStatusEl.style.color='var(--text-muted)';
+  setTimeout(()=>{guestChargeStatusEl.textContent='';},4500);
+}
+function applyParticipantCharge(p,nextValue,reason,announce=true){
+  if(!p)return false;
+  ensureParticipantChargeFields(p);
+  const before=p.charges;
+  p.charges=clampChargeValue(nextValue);
+  if(before===p.charges)return false;
+  if(announce){
+    const why=reason?` (${reason})`:'';
+    announceCharge(`${p.name}: charges ${before} → ${p.charges}${why}`);
+  }
+  return true;
+}
+function applyTurnChargeGain(p,phase){
+  if(!p)return false;
+  ensureParticipantChargeFields(p);
+  const add=phase==='start'?p.chargesTurnStartAdd:p.chargesTurnEndAdd;
+  if(add<=0)return false;
+  const label=phase==='start'?`turn start +${add}`:`turn end +${add}`;
+  return applyParticipantCharge(p,(p.charges||0)+add,label,true);
+}
+let _confirmCb=null;
+function showConfirm(msg,onOk,onCancel){
+  document.getElementById('uiConfirmMsg').textContent=msg;
+  document.getElementById('uiConfirmModal').style.display='flex';
+  _confirmCb={ok:onOk,cancel:onCancel};
+}
+let _promptCb=null;
+function showPrompt(label,def,onOk){
+  document.getElementById('uiPromptLabel').textContent=label;
+  const inp=document.getElementById('uiPromptInput');
+  inp.value=def||'';
+  document.getElementById('uiPromptModal').style.display='flex';
+  setTimeout(()=>inp.focus(),50);
+  _promptCb=onOk;
+}
+document.getElementById('uiConfirmOk').addEventListener('click',()=>{
+  document.getElementById('uiConfirmModal').style.display='none';
+  if(_confirmCb?.ok)_confirmCb.ok();_confirmCb=null;
+});
+document.getElementById('uiConfirmCancel').addEventListener('click',()=>{
+  document.getElementById('uiConfirmModal').style.display='none';
+  if(_confirmCb?.cancel)_confirmCb.cancel();_confirmCb=null;
+});
+document.getElementById('uiPromptOk').addEventListener('click',()=>{
+  const val=document.getElementById('uiPromptInput').value;
+  document.getElementById('uiPromptModal').style.display='none';
+  if(_promptCb)_promptCb(val);_promptCb=null;
+});
+document.getElementById('uiPromptCancel').addEventListener('click',()=>{
+  document.getElementById('uiPromptModal').style.display='none';
+  _promptCb=null;
+});
+document.getElementById('uiPromptInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){document.getElementById('uiPromptOk').click();}
+  if(e.key==='Escape'){document.getElementById('uiPromptCancel').click();}
+});
 
 /* ================================================================
    INIT UI
@@ -203,7 +306,16 @@ function connect() {
   ws.addEventListener('close', ()=>{ setConnStatus('error','Disconnected — reconnecting…'); setTimeout(connect,3000); });
   ws.addEventListener('error', ()=>setConnStatus('error','WS error'));
 }
-function send(obj){ if(ws&&ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+function send(obj){
+  if(ws&&ws.readyState===WebSocket.OPEN){
+    if(obj?.type==='approve_request'||obj?.type==='dice_request_status'||obj?.type==='dice_request'){
+      console.info('[combat] send',obj.type,{requestId:obj.requestId||obj.id||null,approved:obj.approved});
+    }
+    ws.send(JSON.stringify(obj));
+  }else if(obj?.type==='approve_request'||obj?.type==='dice_request_status'||obj?.type==='dice_request'){
+    console.warn('[combat] send dropped (ws not open)',obj.type,{requestId:obj.requestId||obj.id||null,state:ws?.readyState});
+  }
+}
 window.__broadcastAppMessage=(obj)=>send(obj);
 window.__isHost=!!isHost;
 function setConnStatus(s,t){ connLabel.textContent=t; connDot.className='conn-dot'+(s==='connected'?' connected':s==='error'?' error':''); }
@@ -212,6 +324,20 @@ if (!isHost) setInterval(()=>send({type:'state_request'}),5000);
 function makeDiceRequestId(){
   const base=`${Date.now().toString(36)}-${(++diceRequestCounter).toString(36)}`;
   return crypto?.randomUUID?.() || `dice-${base}`;
+}
+
+function hashStringToSeed(str=''){
+  let h=2166136261>>>0;
+  for(let i=0;i<str.length;i++){
+    h^=str.charCodeAt(i);
+    h=Math.imul(h,16777619);
+  }
+  return h>>>0;
+}
+
+function normalizeRequestId(req={}){
+  const id=req.id||req.requestId||makeDiceRequestId();
+  return {id,requestId:id};
 }
 
 function getCurrentSharedDiceState(){
@@ -225,7 +351,7 @@ function relayPromptRollResult(payload){
   return;
 }
 
-function requestDiceRoll(expr, opts = {}) {
+function requestDiceRollLegacy(expr, opts = {}) {
   const normalized = (expr || '1d20').trim() || '1d20';
 
   // HOST rolls directly
@@ -241,8 +367,10 @@ function requestDiceRoll(expr, opts = {}) {
     return;
   }
 
+  const reqId=makeDiceRequestId();
   const req = {
-    id: makeDiceRequestId(),
+    id: reqId,
+    requestId: reqId,
     requestType: 'dice',
     kind: 'dice',
     expression: normalized,
@@ -331,11 +459,12 @@ function applyIncomingDiceState(diceState){
 
 function makeSharedRollPayload(req){
   const expression=String(req.expression||'1d20').trim()||'1d20';
+  const reqId=req.requestId||req.id||makeDiceRequestId();
   const rollId=req.rollId||makeDiceRequestId();
   const seed=req.seed!==undefined ? (req.seed>>>0) : hashStringToSeed(`${rollId}|${expression}|${req.fromGuestName||req.guestName||'guest'}`);
   return {
     rollId,
-    requestId:req.requestId||req.id||rollId,
+    requestId:reqId,
     expression,
     seed,
     fromGuestName:req.fromGuestName||req.guestName||'Guest',
@@ -345,63 +474,86 @@ function makeSharedRollPayload(req){
 }
 
 function approvePendingRequest(req, approve) {
+  const reqId=req?.id||req?.requestId;
   const kind = req.requestType || req.kind || req.type || 'move';
+  console.info('[combat] approvePendingRequest',{
+    kind,
+    approve,
+    reqId,
+    req
+  });
 
   // -----------------------------
   // HOST-AUTHORITATIVE DICE FLOW
   // -----------------------------
   if (kind === 'dice') {
-    pendingRequests = pendingRequests.filter(r => r.id !== req.id);
-    updatePendingList(pendingRequests);
-
+    // Keep pending list server-authoritative. Do not remove locally here,
+    // otherwise failed/missed status messages cause "ghost" re-appears later.
+    if(!reqId)return;
     if (!approve) {
       send({
         type: 'dice_request_status',
-        requestId: req.id,
+        requestId: reqId,
+        id: reqId,
         approved: false,
         reason: 'denied'
       });
       return;
     }
 
-    const payload = makeSharedRollPayload(req);
+    try{
+      const payload = makeSharedRollPayload(req);
+      activeDiceRequestId = payload.requestId;
 
-    activeDiceRequestId = payload.requestId;
+      // If host dice are still marked as rolling, reset first so this approval
+      // cannot silently no-op due to the roller's early-return guard.
+      if (window.combatDice?._rolling) {
+        window.clearCombatDice?.();
+      }
 
-    send({
-      type: 'dice_request_status',
-      requestId: req.id,
-      approved: true,
-      rollId: payload.rollId
-    });
+      send({
+        type: 'dice_request_status',
+        requestId: reqId,
+        id: reqId,
+        approved: true,
+        rollId: payload.rollId
+      });
 
-    // HOST performs the REAL roll using the same path
-// as normal host dice rolls.
-window.rollCombatDice?.(
-  payload.expression || req.expression || '1d20',
-  {
-    thrower:
-      payload.fromGuestName ||
-      req.fromGuestName ||
-      req.guestName ||
-      'Guest',
+      // Host performs the authoritative roll.
+      window.rollCombatDice?.(
+        payload.expression || req.expression || '1d20',
+        {
+          thrower:
+            payload.fromGuestName ||
+            req.fromGuestName ||
+            req.guestName ||
+            'Guest',
+          requestId: payload.requestId,
+          rollId: payload.rollId,
+          seed: payload.seed,
+          shared: true
+        }
+      );
 
-    requestId: payload.requestId,
-    rollId: payload.rollId,
-    shared: true
-  }
-);
-
-const s = document.getElementById('diceResult');
-
-if (s) {
-  s.className = '';
-  s.textContent = '🎲 Rolling...';
-}
-
-    // IMPORTANT:
-    // DO NOT call syncToServer() here.
-    // It overwrites the active dice state with stale state.
+      const s = document.getElementById('diceResult');
+      if (s) {
+        s.className = '';
+        s.textContent = '🎲 Rolling...';
+      }
+    }catch(err){
+      console.error('[combat] approve dice failed',{
+        reqId,
+        req,
+        error:err?.message||err
+      });
+      send({
+        type:'dice_request_status',
+        requestId:reqId,
+        id:reqId,
+        approved:false,
+        reason:'host_error'
+      });
+    }
 
     return;
   }
@@ -411,7 +563,8 @@ if (s) {
   // -----------------------------
   send({
     type: 'approve_request',
-    requestId: req.id,
+    requestId: reqId,
+    id: reqId,
     approve
   });
 }
@@ -440,7 +593,14 @@ function handleMessage(msg) {
     return;
   }
   if (msg.type==='dice_request'&&isHost){
-    const req={...(msg.request||msg),requestType:'dice',kind:'dice'};
+    const rawReq={...(msg.request||msg)};
+    const ids=normalizeRequestId(rawReq);
+    const req={...rawReq,...ids,requestType:'dice',kind:'dice'};
+    console.info('[combat] host received dice_request',{
+      requestId:req.id,
+      from:req.fromGuestName||req.guestName||'Guest',
+      expression:req.expression||'1d20'
+    });
     pendingRequests=[...pendingRequests.filter(r=>r.id!==req.id),req];
     updatePendingList(pendingRequests);
     if(req.prompted || req.autoApprove || guestDiceEnabled){
@@ -450,11 +610,24 @@ function handleMessage(msg) {
   }
   if (msg.type==='dice_request_status'&&!isHost){
     const s=document.getElementById('diceResult');
+    const statusRequestId=msg.requestId||msg.id||null;
+    const matchesActive=!statusRequestId||!activeDiceRequestId||statusRequestId===activeDiceRequestId;
+    console.info('[combat] guest received dice_request_status',{
+      statusRequestId,
+      activeDiceRequestId,
+      matchesActive,
+      approved:msg.approved,
+      rollId:msg.rollId||null
+    });
     if(msg.approved===true){
-      if(activeDiceRequestId&&msg.requestId===activeDiceRequestId&&s){s.className='rolling';s.textContent='🎲 Approved — rolling…';}
+      if(matchesActive&&s){s.className='rolling';s.textContent='🎲 Approved — rolling…';}
+      const g=document.getElementById('guestDiceStatus');
+      if(matchesActive&&g){g.textContent='🎲 Approved — rolling…';g.style.color='var(--accent2)';}
     }else if(msg.approved===false){
-      if(activeDiceRequestId&&msg.requestId===activeDiceRequestId&&s){s.className='';s.textContent='❌ Dice request denied.';}
-      activeDiceRequestId=null;
+      if(matchesActive&&s){s.className='';s.textContent='❌ Dice request denied.';}
+      const g=document.getElementById('guestDiceStatus');
+      if(matchesActive&&g){g.textContent='❌ Dice request denied.';g.style.color='var(--danger)';}
+      if(matchesActive)activeDiceRequestId=null;
     }
     return;
   }
@@ -516,6 +689,15 @@ if (msg.type === 'dice_roll_result') {
     else{guestMoveStatus.textContent='❌ DM denied your move.';guestMoveStatus.style.color='var(--danger)';}
     setTimeout(()=>{guestMoveStatus.textContent='';},5000);drawAll();return;
   }
+  if(msg.type==='charge_announce'){
+    if(msg.text)showAlert(`📣 ${msg.text}`);
+    return;
+  }
+  if(msg.type==='guest_charge_update_result'&&!isHost){
+    if(msg.ok===true)setGuestChargeStatus('✅ Charges updated.','ok');
+    else setGuestChargeStatus('❌ Charge update rejected.','error');
+    return;
+  }
   if (msg.type==='host_disconnected'&&!isHost){setConnStatus('error','DM disconnected');currentTurnBanner.style.display='none';return;}
   if (msg.type==='draw_rejected'&&!isHost){guestMoveStatus.textContent='❌ Drawing disabled by DM.';guestMoveStatus.style.color='var(--danger)';setTimeout(()=>{guestMoveStatus.textContent='';},3000);return;}
   if (msg.type==='dice_roll_prompt'){
@@ -532,7 +714,7 @@ renderPortraitPreview(editPortraitPreview, '');
 
 function applyParticipantsWithMotion(nextParticipants){
   const previousById=new Map((participants||[]).map(p=>[p.id,p]));
-  participants=nextParticipants||[];
+  participants=(nextParticipants||[]).map(ensureParticipantChargeFields);
   const seen=new Set();
   for(const p of participants){
     seen.add(p.id);
@@ -891,7 +1073,7 @@ function drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn){
 }
 function openPortraitEditor(file, applyFn){
   if(!file)return;
-  if(!file.type.startsWith('image/')){alert('Please choose an image file.');return;}
+  if(!file.type.startsWith('image/')){showAlert('Please choose an image file.');return;}
   const reader=new FileReader();
   reader.onload=e=>{
     const src=e.target.result;
@@ -984,7 +1166,7 @@ if(isHost){
 if(isHost){
   addBtn.addEventListener('click',()=>{
     const n=nameEl.value.trim(),ini=parseInt(initiativeEl.value);
-    if(!n||isNaN(ini))return alert('Enter a valid name and initiative.');
+    if(!n||isNaN(ini)){showAlert('Enter a valid name and initiative.');return;}
     let maxHp=parseInt(createMaxHpEl.value);if(isNaN(maxHp))maxHp=undefined;
     let maxSanity=parseInt(createMaxSanityEl.value);if(isNaN(maxSanity))maxSanity=undefined;
     participants.push({
@@ -993,7 +1175,9 @@ if(isHost){
       color:tokenColorEl.value,radius:Math.max(5,parseInt(tokenSizeEl.value)||PARTICLE_RADIUS),
       avatar:pendingNewPortrait||'',
       x:Math.random()*(canvas.width-160)+80,y:Math.random()*(canvas.height-120)+60,
-      movedUnits:0, maxHp,hp:maxHp, maxSanity,sanity:maxSanity,assignedTo:null,pingUntil:null,items:[],spriteFacing:1
+      movedUnits:0, maxHp,hp:maxHp, maxSanity,sanity:maxSanity,
+      maxCharges:MAX_CHARGES,charges:0,chargesTurnStartAdd:0,chargesTurnEndAdd:0,
+      assignedTo:null,pingUntil:null,items:[],spriteFacing:1
     });
     nameEl.value='';initiativeEl.value='';movespeedEl.value='';createMaxHpEl.value='';createMaxSanityEl.value='';
     setPendingNewPortrait('');
@@ -1002,23 +1186,31 @@ if(isHost){
 
   // ▶ Start — sorts by initiative, resets movement
   startBtn.addEventListener('click',()=>{
-    if(!participants.length)return alert('Add participants first.');
+    if(!participants.length){showAlert('Add participants first.');return;}
     participants.sort((a,b)=>b.initiative-a.initiative);
-    participants.forEach(p=>p.movedUnits=0);
+    participants.forEach(p=>{p.movedUnits=0;ensureParticipantChargeFields(p);});
     turnIndex=0;roundNumber=1;activeParticipant=participants[0];
+    applyTurnChargeGain(activeParticipant,'start');
     shownReminderTurnIndex=-1;checkRemindersForTurn(0);
     updateInitiativeList();refreshHpControls();drawAll();checkAndStartAnimLoop();syncToServer();
   });
 
   // ⏭ Next — resets current participant's movement, advance turn
   nextBtn.addEventListener('click',()=>{
-    if(!participants.length)return alert('Start combat first.');
-    if(activeParticipant) activeParticipant.movedUnits=0;
+    if(!participants.length){showAlert('Start combat first.');return;}
+    const previous=activeParticipant;
+    if(previous){
+      previous.movedUnits=0;
+      applyTurnChargeGain(previous,'end');
+    }
     const newIndex=(turnIndex+1)%participants.length;
     if(newIndex===0)roundNumber++;
     turnIndex=newIndex;
     activeParticipant=participants[turnIndex];
-    if(activeParticipant) activeParticipant.movedUnits=0;
+    if(activeParticipant){
+      activeParticipant.movedUnits=0;
+      applyTurnChargeGain(activeParticipant,'start');
+    }
     checkRemindersForTurn(turnIndex);
     updateInitiativeList();refreshHpControls();drawAll();checkAndStartAnimLoop();syncToServer();
   });
@@ -1030,6 +1222,22 @@ if(isHost){
   sanityDecreaseBtn.addEventListener('click',()=>{if(!activeParticipant)return;activeParticipant.sanity=Math.max(0,(activeParticipant.sanity||0)-1);refreshHpControls();updateInitiativeList();drawAll();syncToServer();checkZeroAndOfferRemoval(activeParticipant);});
   sanityIncreaseBtn.addEventListener('click',()=>{if(!activeParticipant)return;const m=activeParticipant.maxSanity;activeParticipant.sanity=m!==undefined?Math.min(m,(activeParticipant.sanity||0)+1):(activeParticipant.sanity||0)+1;refreshHpControls();updateInitiativeList();drawAll();syncToServer();});
   applySanityBtn.addEventListener('click',()=>{if(!activeParticipant)return;const ns=parseInt(currentSanityEl.value),nms=parseInt(maxSanityControlEl.value);if(!isNaN(nms))activeParticipant.maxSanity=Math.max(0,nms);if(!isNaN(ns))activeParticipant.sanity=Math.max(0,Math.min(activeParticipant.maxSanity!==undefined?activeParticipant.maxSanity:ns,ns));refreshHpControls();updateInitiativeList();drawAll();syncToServer();checkZeroAndOfferRemoval(activeParticipant);});
+  chargesDecreaseBtn.addEventListener('click',()=>{if(!activeParticipant)return;const changed=applyParticipantCharge(activeParticipant,(activeParticipant.charges||0)-1,'manual',false);if(!changed)return;refreshHpControls();updateInitiativeList();drawAll();syncToServer();});
+  chargesIncreaseBtn.addEventListener('click',()=>{if(!activeParticipant)return;const changed=applyParticipantCharge(activeParticipant,(activeParticipant.charges||0)+1,'manual',false);if(!changed)return;refreshHpControls();updateInitiativeList();drawAll();syncToServer();});
+  applyChargesBtn.addEventListener('click',()=>{
+    if(!activeParticipant)return;
+    ensureParticipantChargeFields(activeParticipant);
+    const nc=parseInt(currentChargesEl.value),ns=parseInt(chargeStartGainEl.value),ne=parseInt(chargeEndGainEl.value);
+    if(!isNaN(ns))activeParticipant.chargesTurnStartAdd=clampChargeGain(ns);
+    if(!isNaN(ne))activeParticipant.chargesTurnEndAdd=clampChargeGain(ne);
+    if(!isNaN(nc))activeParticipant.charges=clampChargeValue(nc);
+    refreshHpControls();updateInitiativeList();drawAll();syncToServer();
+  });
+  announceChargesBtn.addEventListener('click',()=>{
+    if(!activeParticipant)return;
+    ensureParticipantChargeFields(activeParticipant);
+    announceCharge(`${activeParticipant.name}: charges now ${activeParticipant.charges}/${MAX_CHARGES}`);
+  });
 
   // Movement
   showMoveBtn.addEventListener('click',drawAll);
@@ -1050,10 +1258,10 @@ if(isHost){
   drawToolSelect.addEventListener('change',()=>drawTool=drawToolSelect.value);
   fillShapesToggle.addEventListener('change',drawAll);
   cancelDrawBtn.addEventListener('click',()=>{isDrawing=false;currentDrawing=null;drawAll();});
-  clearObjectsBtn.addEventListener('click',()=>{if(!confirm('Clear all drawn objects?'))return;objects=[];selectedObject=null;selectedObjects=[];updateSelectedObjectUI();drawAll();syncToServer();});
-  deleteObjectBtn.addEventListener('click',()=>{const ids=selectedObjects.length?selectedObjects:(selectedObject?[selectedObject.id]:[]);if(!ids.length)return alert('No object selected.');objects=objects.filter(o=>!ids.includes(o.id));selectedObjects=[];selectedObject=null;updateSelectedObjectUI();drawAll();syncToServer();});
-  toggleDragObjectBtn.addEventListener('click',()=>{const ids=selectedObjects.length?selectedObjects:(selectedObject?[selectedObject.id]:[]);if(!ids.length)return alert('No object selected.');objects.forEach(o=>{if(ids.includes(o.id))o.draggable=!o.draggable;});updateSelectedObjectUI();drawAll();});
-  guestDrawToggle.addEventListener('change',()=>{const en=guestDrawToggle.checked;if(!en&&objects.some(o=>o.guestDrawn)){if(confirm('Clear guest drawings too?')){objects=objects.filter(o=>!o.guestDrawn);drawAll();}}syncToServer();});
+  clearObjectsBtn.addEventListener('click',()=>{showConfirm('Clear all drawn objects?',()=>{objects=[];selectedObject=null;selectedObjects=[];updateSelectedObjectUI();drawAll();syncToServer();});});
+  deleteObjectBtn.addEventListener('click',()=>{const ids=selectedObjects.length?selectedObjects:(selectedObject?[selectedObject.id]:[]);if(!ids.length){showAlert('No object selected.');return;}objects=objects.filter(o=>!ids.includes(o.id));selectedObjects=[];selectedObject=null;updateSelectedObjectUI();drawAll();syncToServer();});
+  toggleDragObjectBtn.addEventListener('click',()=>{const ids=selectedObjects.length?selectedObjects:(selectedObject?[selectedObject.id]:[]);if(!ids.length){showAlert('No object selected.');return;}objects.forEach(o=>{if(ids.includes(o.id))o.draggable=!o.draggable;});updateSelectedObjectUI();drawAll();});
+  guestDrawToggle.addEventListener('change',()=>{const en=guestDrawToggle.checked;if(!en&&objects.some(o=>o.guestDrawn)){showConfirm('Clear guest drawings too?',()=>{objects=objects.filter(o=>!o.guestDrawn);drawAll();syncToServer();},()=>syncToServer());}else{syncToServer();}});
   guestDiceToggle.addEventListener('change',()=>syncToServer());
   guestDiceThrowToggle.addEventListener('change',()=>syncToServer());
 
@@ -1095,9 +1303,9 @@ if(isHost){
   window.addEventListener('mousemove',e=>{if(!portraitEditorState||!portraitEditorState.dragging)return;const rect=portraitEditorCanvas.getBoundingClientRect();const sx=portraitEditorCanvas.width/rect.width, sy=portraitEditorCanvas.height/rect.height;const ox=(e.clientX-rect.left)*sx, oy=(e.clientY-rect.top)*sy;portraitOffsetX.value=String(Math.round(portraitEditorState.startOffsetX+(ox-portraitEditorState.dragStartX)));portraitOffsetY.value=String(Math.round(portraitEditorState.startOffsetY+(oy-portraitEditorState.dragStartY)));renderPortraitEditor();});
   window.addEventListener('mouseup',()=>{if(portraitEditorState)portraitEditorState.dragging=false;portraitEditorCanvas.classList.remove('dragging');});
 
-  showManualCircleBtn.addEventListener('click',()=>{if(!activeParticipant)return alert('Select a token first.');const units=parseFloat(manualCircleUnitsEl.value);if(isNaN(units))return;drawAll();ctx.save();ctx.strokeStyle='#22c55e';ctx.lineWidth=2.5;ctx.setLineDash([6,4]);ctx.beginPath();ctx.arc(activeParticipant.x,activeParticipant.y,units*pixelsPerUnit,0,Math.PI*2);ctx.stroke();participants.forEach(p=>{const d=Math.sqrt((p.x-activeParticipant.x)**2+(p.y-activeParticipant.y)**2);if(p!==activeParticipant&&d<=units*pixelsPerUnit+(p.radius||PARTICLE_RADIUS)){ctx.lineWidth=3;ctx.strokeStyle='#f87171';ctx.setLineDash([]);ctx.beginPath();ctx.arc(p.x,p.y,(p.radius||PARTICLE_RADIUS)+3,0,Math.PI*2);ctx.stroke();}});ctx.restore();});
+  showManualCircleBtn.addEventListener('click',()=>{if(!activeParticipant){showAlert('Select a token first.');return;}const units=parseFloat(manualCircleUnitsEl.value);if(isNaN(units))return;drawAll();ctx.save();ctx.strokeStyle='#22c55e';ctx.lineWidth=2.5;ctx.setLineDash([6,4]);ctx.beginPath();ctx.arc(activeParticipant.x,activeParticipant.y,units*pixelsPerUnit,0,Math.PI*2);ctx.stroke();participants.forEach(p=>{const d=Math.sqrt((p.x-activeParticipant.x)**2+(p.y-activeParticipant.y)**2);if(p!==activeParticipant&&d<=units*pixelsPerUnit+(p.radius||PARTICLE_RADIUS)){ctx.lineWidth=3;ctx.strokeStyle='#f87171';ctx.setLineDash([]);ctx.beginPath();ctx.arc(p.x,p.y,(p.radius||PARTICLE_RADIUS)+3,0,Math.PI*2);ctx.stroke();}});ctx.restore();});
   checkDistanceBtn.addEventListener('click',()=>{const p1=participants.find(p=>p.name===distanceFrom.value),p2=participants.find(p=>p.name===distanceTo.value);if(!p1||!p2)return;const dx=p1.x-p2.x,dy=p1.y-p2.y,cd=Math.sqrt(dx*dx+dy*dy),edge=Math.max(0,cd-((p1.radius||PARTICLE_RADIUS)+(p2.radius||PARTICLE_RADIUS)));distanceResult.textContent=`${(edge/pixelsPerUnit).toFixed(2)} units (${Math.round(edge)} px)`;});
-  setBattleSizeBtn.addEventListener('click',()=>{const w=parseInt(battleWidthEl.value),h=parseInt(battleHeightEl.value);if(isNaN(w)||isNaN(h)||w<100||h<100)return alert('Enter dimensions ≥100px.');canvas.width=w;canvas.height=h;drawAll();syncToServer();window.syncDiceCanvas?.();});
+  setBattleSizeBtn.addEventListener('click',()=>{const w=parseInt(battleWidthEl.value),h=parseInt(battleHeightEl.value);if(isNaN(w)||isNaN(h)||w<100||h<100){showAlert('Enter dimensions ≥100px.');return;}canvas.width=w;canvas.height=h;drawAll();syncToServer();window.syncDiceCanvas?.();});
   cfgPixelsPerUnit.addEventListener('change',()=>{pixelsPerUnit=parseFloat(cfgPixelsPerUnit.value)||20;drawAll();syncToServer();});
   cfgTolerance.addEventListener('change',syncToServer);
   cfgAutoApprove.addEventListener('change',syncToServer);
@@ -1131,6 +1339,7 @@ if(isHost){
 const editModal=document.getElementById('editModal');
 function openEditModal(p){
   editingParticipant=p;
+  ensureParticipantChargeFields(p);
   pendingEditPortrait=participantPortraitSrc(p);
   document.getElementById('editName').value=p.name||'';
   document.getElementById('editType').value=p.type||'player';
@@ -1141,6 +1350,9 @@ function openEditModal(p){
   document.getElementById('editHp').value=p.hp??'';
   document.getElementById('editMaxSanity').value=p.maxSanity??'';
   document.getElementById('editSanity').value=p.sanity??'';
+  document.getElementById('editCharges').value=p.charges??0;
+  document.getElementById('editChargeStart').value=p.chargesTurnStartAdd??0;
+  document.getElementById('editChargeEnd').value=p.chargesTurnEndAdd??0;
   document.getElementById('editColor').value=p.color||'#6366f1';
   renderPortraitPreview(editPortraitPreview, pendingEditPortrait);
   editModal.classList.add('open');
@@ -1161,6 +1373,11 @@ if(isHost){
     const nms=parseInt(document.getElementById('editMaxSanity').value),nsa=parseInt(document.getElementById('editSanity').value);
     if(!isNaN(nms))p.maxSanity=Math.max(0,nms);
     if(!isNaN(nsa))p.sanity=Math.max(0,Math.min(p.maxSanity!==undefined?p.maxSanity:nsa,nsa));
+    const nc=parseInt(document.getElementById('editCharges').value),ns=parseInt(document.getElementById('editChargeStart').value),ne=parseInt(document.getElementById('editChargeEnd').value);
+    ensureParticipantChargeFields(p);
+    if(!isNaN(nc))p.charges=clampChargeValue(nc);
+    if(!isNaN(ns))p.chargesTurnStartAdd=clampChargeGain(ns);
+    if(!isNaN(ne))p.chargesTurnEndAdd=clampChargeGain(ne);
     editModal.classList.remove('open');editingParticipant=null;
     updateInitiativeList();refreshHpControls();drawAll();syncToServer();
     checkZeroAndOfferRemoval(p);
@@ -1180,24 +1397,25 @@ function checkZeroAndOfferRemoval(p){
   if(!hpZero&&!sanZero)return;
   const reason=hpZero&&sanZero?'HP and Sanity are both 0':(hpZero?'HP is 0':'Sanity is 0');
   setTimeout(()=>{
-    if(confirm(`${p.name}'s ${reason}. Remove from combat?`)){
+    showConfirm(`${p.name}'s ${reason}. Remove from combat?`,()=>{
       if(measuring&&measuring.entity===p)measuring=null;
       participants=participants.filter(pp=>pp!==p);
       if(activeParticipant===p)activeParticipant=null;
       if(turnIndex>=participants.length)turnIndex=Math.max(0,participants.length-1);
       if(participants.length&&!activeParticipant)activeParticipant=participants[turnIndex]||null;
       updateInitiativeList();refreshHpControls();renderAssignmentList();drawAll();syncToServer();
-    }
+    });
   },50);
 }
 function removeParticipant(p){
-  if(!confirm(`Remove "${p.name}" from combat?`))return;
-  if(measuring&&measuring.entity===p)measuring=null;
-  participants=participants.filter(pp=>pp!==p);
-  if(activeParticipant===p)activeParticipant=null;
-  if(turnIndex>=participants.length)turnIndex=Math.max(0,participants.length-1);
-  if(participants.length&&!activeParticipant)activeParticipant=participants[turnIndex]||null;
-  updateInitiativeList();refreshHpControls();renderAssignmentList();drawAll();syncToServer();
+  showConfirm(`Remove "${p.name}" from combat?`,()=>{
+    if(measuring&&measuring.entity===p)measuring=null;
+    participants=participants.filter(pp=>pp!==p);
+    if(activeParticipant===p)activeParticipant=null;
+    if(turnIndex>=participants.length)turnIndex=Math.max(0,participants.length-1);
+    if(participants.length&&!activeParticipant)activeParticipant=participants[turnIndex]||null;
+    updateInitiativeList();refreshHpControls();renderAssignmentList();drawAll();syncToServer();
+  });
 }
 
 /* ================================================================
@@ -1214,6 +1432,7 @@ function updateInitiativeList(){
     :[...participants];
 
   display.forEach(p=>{
+    ensureParticipantChargeFields(p);
     const realIdx=participants.indexOf(p);
     const isActive=p===activeParticipant,isTurn=realIdx===turnIndex;
     const color=p.color||(p.type==='player'?'#6366f1':'#e05252');
@@ -1264,6 +1483,10 @@ function updateInitiativeList(){
       const sfill=document.createElement('div');sfill.className='hpbar-fill';sfill.style.width=(sanRatio*100)+'%';sfill.style.background=sanColor;
       sbar.appendChild(sfill);info.appendChild(sanDiv);info.appendChild(sbar);
     }
+
+    const chargesDiv=document.createElement('div');chargesDiv.className='rhp';chargesDiv.style.color='#60a5fa';
+    chargesDiv.textContent=`${p.charges}/${MAX_CHARGES} Charges · +${p.chargesTurnStartAdd} start · +${p.chargesTurnEndAdd} end`;
+    info.appendChild(chargesDiv);
 
     // Movement remaining
     if(speed>0){
@@ -1338,6 +1561,7 @@ function updateRightInitiative(){
     :[...participants];
 
   display.forEach(p=>{
+    ensureParticipantChargeFields(p);
     const realIdx=participants.indexOf(p);
     const isTurn=realIdx===turnIndex;
     const color=p.color||(p.type==='player'?'#6366f1':'#e05252');
@@ -1370,6 +1594,17 @@ function updateRightInitiative(){
     }
 
     // Sanity hidden from guests
+
+    if(p.type==='player'){
+      const cDiv=document.createElement('div');cDiv.className='rhp';cDiv.style.color='#60a5fa';
+      cDiv.textContent=`${p.charges}/${MAX_CHARGES} Charges`;
+      info.appendChild(cDiv);
+      if(isMyToken&&(p.chargesTurnStartAdd>0||p.chargesTurnEndAdd>0)){
+        const gainDiv=document.createElement('div');gainDiv.className='rhp';gainDiv.style.color='var(--text-muted)';
+        gainDiv.textContent=`+${p.chargesTurnStartAdd} start · +${p.chargesTurnEndAdd} end`;
+        info.appendChild(gainDiv);
+      }
+    }
 
     // Remaining movement only for own token
     if(isMyToken&&speed>0){
@@ -1425,9 +1660,14 @@ function refreshHpControls(){
   const ok=!!activeParticipant;
   [currentHpEl,maxHpControlEl,hpDecreaseBtn,hpIncreaseBtn,applyHpBtn].forEach(el=>el.disabled=!ok);
   [currentSanityEl,maxSanityControlEl,sanityDecreaseBtn,sanityIncreaseBtn,applySanityBtn].forEach(el=>el.disabled=!ok);
+  [currentChargesEl,chargeStartGainEl,chargeEndGainEl,chargesDecreaseBtn,chargesIncreaseBtn,applyChargesBtn,announceChargesBtn].forEach(el=>el.disabled=!ok);
   if(ok){
+    ensureParticipantChargeFields(activeParticipant);
     currentHpEl.value=activeParticipant.hp??'';maxHpControlEl.value=activeParticipant.maxHp??'';
     currentSanityEl.value=activeParticipant.sanity??'';maxSanityControlEl.value=activeParticipant.maxSanity??'';
+    currentChargesEl.value=activeParticipant.charges??0;
+    chargeStartGainEl.value=activeParticipant.chargesTurnStartAdd??0;
+    chargeEndGainEl.value=activeParticipant.chargesTurnEndAdd??0;
     selectedHpNameEl.style.display='block';
     selectedHpNameEl.textContent=`${activeParticipant.name} ${activeParticipant.type==='player'?'🛡':'⚔'}`;
     selectedSanityNameEl.style.display='block';
@@ -1435,6 +1675,7 @@ function refreshHpControls(){
   } else {
     currentHpEl.value='';maxHpControlEl.value='';selectedHpNameEl.style.display='none';
     currentSanityEl.value='';maxSanityControlEl.value='';selectedSanityNameEl.style.display='none';
+    currentChargesEl.value='';chargeStartGainEl.value='';chargeEndGainEl.value='';
   }
 }
 
@@ -1471,7 +1712,7 @@ function enableInitiativeDnD(){
 ================================================================ */
 function pushMoveHistory(entry){moveHistory.push(entry);if(moveHistory.length>100)moveHistory.shift();}
 function undoLastMove(){
-  if(!moveHistory.length)return alert('Nothing to undo.');
+  if(!moveHistory.length){showAlert('Nothing to undo.');return;}
   const last=moveHistory.pop();
   if(last.type==='move'){
     const p=participants.find(pp=>pp.id===last.id);
@@ -1495,9 +1736,20 @@ function updateSelectedObjectUI(){
 ================================================================ */
 function updatePendingList(list){
   pendingRequests=list||[];
+  console.info('[combat] updatePendingList',{
+    count:pendingRequests.length,
+    items:pendingRequests.map(r=>({
+      id:r?.id||null,
+      requestId:r?.requestId||null,
+      kind:r?.requestType||r?.kind||r?.type||'move',
+      from:r?.fromGuestName||r?.guestName||'Guest'
+    }))
+  });
   pendingList.innerHTML='';
   if(!pendingRequests.length){pendingList.innerHTML='<div class="small">No pending requests.</div>';return;}
   pendingRequests.forEach(r=>{
+    const ids=normalizeRequestId(r||{});
+    const request={...(r||{}),...ids};
     const kind=r.requestType||r.kind||r.type||'move';
     const isDice=kind==='dice';
 
@@ -1506,25 +1758,25 @@ function updatePendingList(list){
     const header=document.createElement('div');header.className='req-header';
     const info=document.createElement('div');info.className='req-info';
     info.innerHTML=isDice
-      ? `<strong>${r.fromGuestName||r.guestName||'Guest'}</strong> → <em>🎲 Dice roll</em>`
-      : `<strong>${r.fromGuestName||r.guestName||'Guest'}</strong> → <em>${r.participantName||'Move request'}</em>`;
+      ? `<strong>${request.fromGuestName||request.guestName||'Guest'}</strong> → <em>🎲 Dice roll</em>`
+      : `<strong>${request.fromGuestName||request.guestName||'Guest'}</strong> → <em>${request.participantName||'Move request'}</em>`;
     const btns=document.createElement('div');btns.className='req-btns';
     const ap=document.createElement('button');ap.className='btn-success btn-small';ap.textContent='✓ Approve';
     const dn=document.createElement('button');dn.className='btn-danger btn-small';dn.textContent='✕ Deny';
-    ap.addEventListener('click',()=>approvePendingRequest(r,true));
-    dn.addEventListener('click',()=>approvePendingRequest(r,false));
+    ap.addEventListener('click',()=>approvePendingRequest(request,true));
+    dn.addEventListener('click',()=>approvePendingRequest(request,false));
     btns.appendChild(ap);btns.appendChild(dn);header.appendChild(info);header.appendChild(btns);card.appendChild(header);
 
     const mov=document.createElement('div');mov.className='req-mov';
     if(isDice){
-      const expr=r.expression||'1d20';
-      mov.innerHTML=`Requested roll: <strong>${expr}</strong>${r.fromGuestName?` by <strong>${r.fromGuestName}</strong>`:''}`;
+      const expr=request.expression||'1d20';
+      mov.innerHTML=`Requested roll: <strong>${expr}</strong>${request.fromGuestName?` by <strong>${request.fromGuestName}</strong>`:''}`;
     }else{
-      const overBy=(r.distUnits||0)-((r.remaining||0)+(r.extraUnits||0));
+      const overBy=(request.distUnits||0)-((request.remaining||0)+(request.extraUnits||0));
       const isOver=overBy>0.01;
-      let html=`Remaining: <strong style="color:${(r.remaining||0)<=0?'#f87171':'#818cf8'}">${(r.remaining||0).toFixed(1)}u</strong>`;
-      if(r.extraUnits>0)html+=` (+${r.extraUnits}u extra)`;
-      html+=`&nbsp;·&nbsp; Requested: <strong>${(r.distUnits||0).toFixed(1)}u</strong>`;
+      let html=`Remaining: <strong style="color:${(request.remaining||0)<=0?'#f87171':'#818cf8'}">${(request.remaining||0).toFixed(1)}u</strong>`;
+      if(request.extraUnits>0)html+=` (+${request.extraUnits}u extra)`;
+      html+=`&nbsp;·&nbsp; Requested: <strong>${(request.distUnits||0).toFixed(1)}u</strong>`;
       if(isOver)html+=`<br><span class="req-warn">⚠ Exceeds limit by ${overBy.toFixed(1)}u</span>`;
       mov.innerHTML=html;
     }
@@ -1539,16 +1791,25 @@ function updatePendingList(list){
    GUEST CONTROLS
 ================================================================ */
 if(!isHost){
+  function requestGuestChargeDelta(delta){
+    if(!localSelection)return setGuestChargeStatus('Select your token first.','warn');
+    const p=participants.find(pp=>pp.id===localSelection);
+    if(!p||p.type!=='player')return setGuestChargeStatus('Only player tokens can use charges.','warn');
+    send({type:'guest_charge_update',participantId:localSelection,delta,announce:guestChargeAnnounceToggle?.checked!==false});
+    setGuestChargeStatus('⏳ Charge update sent…');
+  }
   guestRequestMoveBtn.addEventListener('click',()=>{
     if(!localSelection)return setGuestStatus('Select your token first.','warn');
     if(!lastTargetPos)return setGuestStatus('Click the map to set a target first.','warn');
     send({type:'request_move',participantId:localSelection,target:lastTargetPos,extraUnits:parseFloat(guestExtraEl.value)||0});
     lastTargetPos=null;updateGuestTargetInfo();drawAll();
   });
+  guestChargesDecreaseBtn?.addEventListener('click',()=>requestGuestChargeDelta(-1));
+  guestChargesIncreaseBtn?.addEventListener('click',()=>requestGuestChargeDelta(1));
   guestClearTargetBtn.addEventListener('click',()=>{lastTargetPos=null;updateGuestTargetInfo();drawAll();});
   guestDrawToolEl.addEventListener('change',()=>{});
   guestCancelDrawBtn.addEventListener('click',()=>{guestDrawMode=false;guestIsDrawing=false;guestCurrentDrawing=null;drawAll();});
-  guestClearMyDrawingsBtn.addEventListener('click',()=>{if(!confirm('Clear all your drawings?'))return;objects=objects.filter(o=>!(o.guestDrawn&&o.drawnBy===GUEST_NAME));send({type:'guest_clear_mine',name:GUEST_NAME});drawAll();});
+  guestClearMyDrawingsBtn.addEventListener('click',()=>{showConfirm('Clear all your drawings?',()=>{objects=objects.filter(o=>!(o.guestDrawn&&o.drawnBy===GUEST_NAME));send({type:'guest_clear_mine',name:GUEST_NAME});drawAll();});});
   function setGuestStatus(msg,type){guestMoveStatus.textContent=msg;guestMoveStatus.style.color=type==='warn'?'var(--accent2)':'var(--text-muted)';setTimeout(()=>{guestMoveStatus.textContent='';},4000);}
 }
 
@@ -1911,7 +2172,7 @@ canvas.addEventListener('mousedown',evt=>{
   } else {
     // Out of range — offer to enable free move
     const over=(distUnits-(remaining+extra)).toFixed(1);
-    if(confirm(`Out of range!\nRequested: ${distUnits.toFixed(1)}u — Remaining: ${(remaining+extra).toFixed(1)}u (over by ${over}u)\n\nEnable Free Movement to place here anyway?`)){
+    showConfirm(`Out of range! Requested: ${distUnits.toFixed(1)}u — Remaining: ${(remaining+extra).toFixed(1)}u (over by ${over}u). Enable Free Movement to place here anyway?`,()=>{
       moveConfigToggle.checked=true;moveConfig=true;
       const from={x:activeParticipant.x,y:activeParticipant.y};
       pushMoveHistory({type:'move',id:activeParticipant.id,from,movedBefore:moved});
@@ -1919,7 +2180,7 @@ canvas.addEventListener('mousedown',evt=>{
       activeParticipant.movedUnits=moved+distUnits;
       animateParticipantMove(activeParticipant.id,from.x,from.y,pos.x,pos.y,1000);
       updateInitiativeList();drawAll();syncToServer();
-    }
+    });
   }
 });
 
@@ -2536,7 +2797,7 @@ function buildReminderUI(p,container){
     addBtn.addEventListener('click',e=>{
       e.stopPropagation();
       addSlot.innerHTML='';
-      const form=makeReminderForm(null,(txt,interval,instances)=>{
+      const form=makeReminderForm(null,(txt,interval,instances,duration)=>{
         if(!p.reminders)p.reminders=[];
         p.reminders.push({
           id:'rem_'+Date.now()+'_'+Math.random().toString(36).slice(2),
@@ -2624,8 +2885,7 @@ function buildItemsUI(p,container){
         const delBtn=document.createElement('button');delBtn.className='ir-item-del-btn';delBtn.textContent='✕';delBtn.title='Remove item';
         delBtn.addEventListener('click',e=>{
           e.stopPropagation();
-          if(!confirm(`Remove "${it.name}" from ${p.name}?`))return;
-          p.items=p.items.filter(x=>x.id!==it.id);refresh();syncToServer();
+          showConfirm(`Remove "${it.name}" from ${p.name}?`,()=>{p.items=p.items.filter(x=>x.id!==it.id);refresh();syncToServer();});
         });
 
         row.appendChild(visBtn);row.appendChild(nameBtn);row.appendChild(editBtn);row.appendChild(delBtn);
@@ -2719,8 +2979,9 @@ function showItemContextMenu(p,clientX,clientY){
       nAct.addEventListener('click',()=>{
         closeItemContextMenu();
         const alreadyNicked=loadLocalNicknames()[p.id];
-        const action=prompt(`Set nickname for enemy (blank to clear):\nCurrent: "${alreadyNicked||'none'}"`,alreadyNicked||'');
-        if(action!==null){const map=loadLocalNicknames();if(action.trim()==='')delete map[p.id];else map[p.id]=action.trim();saveLocalNicknames(map);drawAll();}
+        showPrompt(`Set nickname for enemy (blank to clear). Current: "${alreadyNicked||'none'}"`,alreadyNicked||'',(action)=>{
+          const map=loadLocalNicknames();if(action.trim()==='')delete map[p.id];else map[p.id]=action.trim();saveLocalNicknames(map);drawAll();
+        });
       });
       actions.appendChild(nAct);
     }
@@ -2738,30 +2999,31 @@ function showItemContextMenu(p,clientX,clientY){
     dmgAct.innerHTML='<span>⚔️</span><span>Damage Entity</span>';
     dmgAct.addEventListener('click',()=>{
       closeItemContextMenu();
-      const dmgType=prompt('Damage type? (phys / mill / both):','phys');
-      if(dmgType===null)return;
-      const dt=dmgType.trim().toLowerCase();
-      const isMill=dt==='mill';
-      const isBoth=dt==='both';
-      const raw=prompt(`Enter ${isBoth?'both':isMill?'mill':'phys'} damage amount:`);
-      if(raw===null)return;
-      const dmg=parseInt(raw,10);
-      if(isNaN(dmg)||dmg<=0)return;
-      if(isBoth){
-        p.hp=Math.max(0,(p.hp||0)-dmg);
-        p.sanity=Math.max(0,(p.sanity||0)-dmg);
-      } else if(isMill){
-        p.sanity=Math.max(0,(p.sanity||0)-dmg);
-      } else {
-        p.hp=Math.max(0,(p.hp||0)-dmg);
-      }
-      if(p.type==='player'){
-        damageAnimations.set(p.id,{start:performance.now()});
-      }
-      screenShakeUntil=performance.now()+350;
-      startAnimLoop();
-      updateInitiativeList();refreshHpControls();drawAll();syncToServer();
-      checkZeroAndOfferRemoval(p);
+      showPrompt('Damage type? (phys / mill / both):','phys',(dmgType)=>{
+        if(!dmgType)return;
+        const dt=dmgType.trim().toLowerCase();
+        const isMill=dt==='mill';
+        const isBoth=dt==='both';
+        showPrompt(`Enter ${isBoth?'both':isMill?'mill':'phys'} damage amount:`,'0',(raw)=>{
+          const dmg=parseInt(raw,10);
+          if(isNaN(dmg)||dmg<=0)return;
+          if(isBoth){
+            p.hp=Math.max(0,(p.hp||0)-dmg);
+            p.sanity=Math.max(0,(p.sanity||0)-dmg);
+          } else if(isMill){
+            p.sanity=Math.max(0,(p.sanity||0)-dmg);
+          } else {
+            p.hp=Math.max(0,(p.hp||0)-dmg);
+          }
+          if(p.type==='player'){
+            damageAnimations.set(p.id,{start:performance.now()});
+          }
+          screenShakeUntil=performance.now()+350;
+          startAnimLoop();
+          updateInitiativeList();refreshHpControls();drawAll();syncToServer();
+          checkZeroAndOfferRemoval(p);
+        });
+      });
     });
     actions.appendChild(dmgAct);
     // View Details (wiki data)
@@ -2817,6 +3079,7 @@ function spawnParticipant(data){
     speed:data.speed,color:data.color,radius:data.radius,
     avatar:'',x:canvasSpawnPos.x,y:canvasSpawnPos.y,
     movedUnits:0,maxHp:data.maxHp,hp:data.maxHp,maxSanity:data.maxSanity,sanity:data.maxSanity,
+    maxCharges:MAX_CHARGES,charges:0,chargesTurnStartAdd:0,chargesTurnEndAdd:0,
     assignedTo:null,pingUntil:null,items:[]
   });
   updateInitiativeList();renderAssignmentList();drawAll();syncToServer();
@@ -2825,16 +3088,28 @@ function spawnParticipant(data){
 if(isHost){
   document.getElementById('canvasCtxNewEntity').addEventListener('click',()=>{
     closeCanvasCtxMenu();
-    const name=prompt('Entity name:','New Character');if(!name)return;
-    const type=(prompt('Type (player/enemy):','player')||'player').trim().toLowerCase();
-    const iniRaw=prompt('Initiative (number):','0');if(iniRaw===null)return;
-    const ini=parseInt(iniRaw)||0;
-    const speedRaw=prompt('Move speed (units):','30');if(speedRaw===null)return;
-    const speed=parseInt(speedRaw)||0;
-    const hpRaw=prompt('Max HP:','10');if(hpRaw===null)return;
-    const maxHp=parseInt(hpRaw)||undefined;
+    document.getElementById('uiSpawnName').value='New Character';
+    document.getElementById('uiSpawnType').value='player';
+    document.getElementById('uiSpawnInit').value='0';
+    document.getElementById('uiSpawnSpeed').value='30';
+    document.getElementById('uiSpawnHp').value='10';
+    document.getElementById('uiSpawnModal').style.display='flex';
+    setTimeout(()=>{const el=document.getElementById('uiSpawnName');el.focus();el.select();},50);
+  });
+  document.getElementById('uiSpawnOk').addEventListener('click',()=>{
+    const name=document.getElementById('uiSpawnName').value.trim();
+    if(!name){showAlert('Enter an entity name.');return;}
+    const type=document.getElementById('uiSpawnType').value;
+    const ini=parseInt(document.getElementById('uiSpawnInit').value)||0;
+    const speed=parseInt(document.getElementById('uiSpawnSpeed').value)||0;
+    const maxHpRaw=parseInt(document.getElementById('uiSpawnHp').value);
+    const maxHp=isNaN(maxHpRaw)?undefined:maxHpRaw;
     const color=type==='enemy'?'#e05252':'#6366f1';
+    document.getElementById('uiSpawnModal').style.display='none';
     spawnParticipant({name,type,initiative:ini,speed,maxHp,color,radius:PARTICLE_RADIUS});
+  });
+  document.getElementById('uiSpawnCancel').addEventListener('click',()=>{
+    document.getElementById('uiSpawnModal').style.display='none';
   });
 
   document.getElementById('canvasCtxQuickPlayer').addEventListener('click',()=>{
@@ -2851,7 +3126,7 @@ if(isHost){
 
   document.getElementById('canvasCtxFromTemplate').addEventListener('click',()=>{
     closeCanvasCtxMenu();
-    if(!wikiTemplates.length){alert('No wiki templates imported yet. Use "Import Wiki Enemies" in the Setup tab.');return;}
+    if(!wikiTemplates.length){showAlert('No wiki templates imported yet. Use "Import Wiki Enemies" in the Setup tab.');return;}
     openWikiTemplateSelector();
   });
 }
@@ -2888,7 +3163,7 @@ if(isHost){
     reader.onload=(e)=>{
       try{
         const imported=JSON.parse(e.target.result);
-        if(!Array.isArray(imported)){alert('Invalid file format! Expected a JSON array of enemies.');return;}
+        if(!Array.isArray(imported)){showAlert('Invalid file format! Expected a JSON array of enemies.');return;}
         let added=0,updated=0;
         imported.forEach(tmpl=>{
           const idx=wikiTemplates.findIndex(t=>t.name&&tmpl.name&&t.name===tmpl.name);
@@ -2896,8 +3171,8 @@ if(isHost){
           else{wikiTemplates.push(tmpl);added++;}
         });
         saveWikiTemplates();
-        alert(`Import complete: ${added} new, ${updated} updated.`);
-      }catch(err){alert('Error reading file: '+err.message);}
+        showAlert(`Import complete: ${added} new, ${updated} updated.`);
+      }catch(err){showAlert('Error reading file: '+err.message);}
     };
     reader.readAsText(file);
     evt.target.value='';
@@ -2932,7 +3207,7 @@ if(isHost){
 
       const enemy=normalizeDroppedWikiEnemy(evt.dataTransfer);
       if(!enemy){
-        alert('Could not read the dropped enemy.');
+        showAlert('Could not read the dropped enemy.');
         return;
       }
 
@@ -3036,6 +3311,7 @@ function spawnFromWikiTemplateAtPosition(tmpl, dropX, dropY){
     x:dropX ?? canvasSpawnPos.x,
     y:dropY ?? canvasSpawnPos.y,
     movedUnits:0,maxHp:maxHp,hp:maxHp,maxSanity:tmpl.sanity?maxSanity:undefined,sanity:tmpl.sanity?maxSanity:undefined,
+    maxCharges:MAX_CHARGES,charges:0,chargesTurnStartAdd:0,chargesTurnEndAdd:0,
     assignedTo:null,pingUntil:null,items:[],
     wikiData:wikiData
   });
@@ -3264,8 +3540,11 @@ function requestDiceRoll(expr, opts={}){
     window.rollCombatDice?.(normalized,{thrower:'DM'});
     return;
   }
+  if(activeDiceRequestId)return;
+  const reqId=makeDiceRequestId();
   const req={
-    id:makeDiceRequestId(),
+    id:reqId,
+    requestId:reqId,
     requestType:'dice',
     kind:'dice',
     expression:normalized,
@@ -3274,9 +3553,15 @@ function requestDiceRoll(expr, opts={}){
     createdAt:Date.now(),
     prompted: !!opts.prompted,
     promptId: opts.promptId || null,
-    autoApprove: !!guestDiceEnabled
+    autoApprove: false
   };
   activeDiceRequestId=req.id;
+  console.info('[combat] guest requestDiceRoll',{
+    requestId:req.id,
+    expression:req.expression,
+    prompted:req.prompted,
+    promptId:req.promptId||null
+  });
   window.__broadcastAppMessage?.({type:'dice_request',request:req});
   const s=document.getElementById('diceResult');
   if(s){s.className='rolling';s.textContent='⏳ Request sent to DM…';}
@@ -3299,7 +3584,7 @@ if(rollForAllGuestsBtn){
   rollForAllGuestsBtn.addEventListener('click',()=>{
     if(!isHost)return;
     const expr=(document.getElementById('diceExpr').value||'').trim()||'1d20';
-    if(!connectedGuests.length){alert('No guests are connected.');return;}
+    if(!connectedGuests.length){showAlert('No guests are connected.');return;}
     lastDicePrompt={id:makeDiceRequestId(),expression:expr,createdAt:Date.now()};
     window.__broadcastAppMessage?.({type:'dice_roll_prompt',expression:expr,id:lastDicePrompt.id,source:'host',prompt:lastDicePrompt});
     syncToServer();

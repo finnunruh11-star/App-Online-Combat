@@ -142,6 +142,7 @@ const selectedObjectLabel=document.getElementById('selectedObjectLabel'), delete
 const backgroundUploadEl=document.getElementById('backgroundUpload'), backgroundFillModeEl=document.getElementById('backgroundFillMode'), clearBackgroundBtn=document.getElementById('clearBackground');
 const imageUpload=document.getElementById('imageUpload'), guestDrawToggle=document.getElementById('guestDrawToggle');
 const guestDiceToggle=document.getElementById('guestDiceToggle'), guestDiceThrowToggle=document.getElementById('guestDiceThrowToggle');
+const guestInitiativeToggle=document.getElementById('guestInitiativeToggle');
 const manualCircleUnitsEl=document.getElementById('manualCircleUnits'), showManualCircleBtn=document.getElementById('showManualCircle');
 const newPortraitPreview=document.getElementById('newPortraitPreview'), newPortraitBtn=document.getElementById('newPortraitBtn'), clearNewPortraitBtn=document.getElementById('clearNewPortrait'), newPortraitFile=document.getElementById('newPortraitFile');
 const editPortraitPreview=document.getElementById('editPortraitPreview'), editPortraitBtn=document.getElementById('editPortraitBtn'), clearEditPortraitBtn=document.getElementById('clearEditPortrait'), editPortraitFile=document.getElementById('editPortraitFile');
@@ -344,6 +345,8 @@ document.getElementById('uiPromptInput').addEventListener('keydown',e=>{
 ================================================================ */
 function initUI() {
   if (isHost) {
+    document.body.classList.add('host-mode');
+    document.body.classList.remove('guest-mode');
     document.getElementById('hostControls').style.display='block';
     roleBadge.textContent='DM'; roleBadge.className='role-badge host';
     document.getElementById('rs-combat-flow').classList.add('host-show');
@@ -371,6 +374,8 @@ function initUI() {
       document.getElementById('rs-toggle-btn').textContent='‹';
     });
   } else {
+    document.body.classList.add('guest-mode');
+    document.body.classList.remove('host-mode');
     document.getElementById('guestControls').style.display='flex';
     document.getElementById('guestDiceRequestPanel')?.style && (document.getElementById('guestDiceRequestPanel').style.display='flex');
     roleBadge.textContent=GUEST_NAME; roleBadge.className='role-badge guest';
@@ -387,6 +392,12 @@ function initUI() {
   initInventoryUI();
 }
 initUI();
+
+function applyGuestInitiativeVisibility(){
+  if(isHost)return;
+  document.body.classList.toggle('guest-init-hidden', !guestInitiativeEnabled);
+  if(guestInitiativeEnabled)document.getElementById('right-sidebar').classList.remove('collapsed');
+}
 
 // Flush deferred initiative list rebuilds when focus leaves an editing field
 if(isHost){
@@ -881,6 +892,7 @@ function applyHostState(state) {
   if(state.guestDrawEnabled!==undefined){guestDrawEnabled=state.guestDrawEnabled;guestDrawToggle.checked=guestDrawEnabled;}
   if(state.guestDiceEnabled!==undefined){guestDiceEnabled=state.guestDiceEnabled;if(guestDiceToggle)guestDiceToggle.checked=guestDiceEnabled;}
   if(state.guestDiceThrowEnabled!==undefined){guestDiceThrowEnabled=state.guestDiceThrowEnabled;if(guestDiceThrowToggle)guestDiceThrowToggle.checked=guestDiceThrowEnabled;}
+  if(state.guestInitiativeEnabled!==undefined){guestInitiativeEnabled=state.guestInitiativeEnabled;if(guestInitiativeToggle)guestInitiativeToggle.checked=guestInitiativeEnabled;}
   if(state.initiativeDisplayOrder!==undefined){
     initiativeDisplayOrder=state.initiativeDisplayOrder;
     const sortBtn=document.getElementById('rs-sort-btn');
@@ -945,14 +957,16 @@ function applyGuestState(state) {
     updateGuestDicePanel();
     document.getElementById('guestControls')?.style && (document.getElementById('guestControls').style.display='flex');
   }
+  if(state.guestInitiativeEnabled!==undefined){
+    guestInitiativeEnabled=!!state.guestInitiativeEnabled;
+  }
   if(state.bagItems!==undefined)bagItems=normalizeBagItems(state.bagItems);
   if(state.bagWeightMultipliers!==undefined)bagWeightMultipliers=normalizeBagWeightMultipliers(state.bagWeightMultipliers);
   // Guests always see initiative sidebar; sync sort order
   if(state.initiativeDisplayOrder!==undefined){
     initiativeDisplayOrder=state.initiativeDisplayOrder;
   }
-  // Always ensure sidebar visible for guests
-  document.getElementById('right-sidebar').classList.remove('collapsed');
+  applyGuestInitiativeVisibility();
 
   const myTokenIds=participants.filter(p=>p.assignedTo===GUEST_NAME).map(p=>p.id);
   if(myTokenIds.length>0){
@@ -1026,7 +1040,7 @@ function syncToServer(){
     guestDrawEnabled:guestDrawToggle.checked,
     guestDiceEnabled:guestDiceToggle.checked,
     guestDiceThrowEnabled:guestDiceThrowToggle.checked,
-    guestInitiativeEnabled:true,
+    guestInitiativeEnabled:guestInitiativeToggle?!!guestInitiativeToggle.checked:true,
     initiativeDisplayOrder,
     diceSettings:window.combatDice?.getSettings?.()||clampDiceSettings(),
     diceState:getCurrentSharedDiceState(),
@@ -1312,9 +1326,10 @@ if(isHost){
   document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
   window.addEventListener('keydown',e=>{
     const t=document.activeElement.tagName;if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA')return;
-    if(e.key==='c'||e.key==='C'){e.preventDefault();switchTab('combat');}
+    if(e.key==='c'||e.key==='C'){e.preventDefault();switchTab('control');}
+    if(e.key==='m'||e.key==='M'){e.preventDefault();switchTab('map');}
     if(e.key==='d'||e.key==='D'){e.preventDefault();switchTab('draw');}
-    if(e.key==='s'||e.key==='S'){e.preventDefault();switchTab('setup');}
+    if(e.key==='s'||e.key==='S'){e.preventDefault();switchTab('control');}
   });
 }
 
@@ -1429,6 +1444,7 @@ if(isHost){
   guestDrawToggle.addEventListener('change',()=>{const en=guestDrawToggle.checked;if(!en&&objects.some(o=>o.guestDrawn)){showConfirm('Clear guest drawings too?',()=>{objects=objects.filter(o=>!o.guestDrawn);drawAll();syncToServer();},()=>syncToServer());}else{syncToServer();}});
   guestDiceToggle.addEventListener('change',()=>syncToServer());
   guestDiceThrowToggle.addEventListener('change',()=>syncToServer());
+  guestInitiativeToggle?.addEventListener('change',()=>syncToServer());
   backgroundFillModeEl?.addEventListener('change',()=>{
     backgroundFillMode=backgroundFillModeEl.value||'stretch';
     drawAll();

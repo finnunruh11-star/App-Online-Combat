@@ -66,6 +66,8 @@ function defaultGameState() {
     diceSettings: defaultDiceSettings(),
     diceState: null,
     latestDicePrompt: null,
+    bagItems: [],
+    bagWeightMultipliers: { fin: 0, nad: 0, kat: 0 },
   };
 }
 
@@ -155,6 +157,8 @@ function maskStateForGuest(room, guestName) {
     diceSettings: room.state.diceSettings,
     latestDicePrompt: room.state.latestDicePrompt,
     diceState: room.state.diceState,
+    bagItems: (room.state.bagItems || []).filter(item => item?.visible !== false),
+    bagWeightMultipliers: room.state.bagWeightMultipliers || { fin: 0, nad: 0, kat: 0 },
     roomCode: room.code,
     guestName: guestName || null,
   };
@@ -201,7 +205,7 @@ function updateStateFromHost(room, msg) {
     'participants', 'objects', 'turnIndex', 'canvasWidth', 'canvasHeight', 'pixelsPerUnit',
     'moveToleranceUnits', 'autoApproveIfWithinTolerance', 'guestDrawEnabled', 'guestInitiativeEnabled',
     'guestDiceEnabled', 'guestDiceThrowEnabled', 'initiativeDisplayOrder', 'diceSettings',
-    'diceState', 'latestDicePrompt',
+    'diceState', 'latestDicePrompt', 'bagItems', 'bagWeightMultipliers',
   ];
   for (const key of keys) {
     if (src[key] !== undefined) room.state[key] = deepClone(src[key]);
@@ -347,6 +351,67 @@ wss.on('connection', ws => {
         return;
       }
 
+      if (msg.type === 'guest_bag_item_move' && ws.mode === 'guest') {
+        const items = Array.isArray(room.state.bagItems) ? room.state.bagItems : [];
+        const idx = items.findIndex(item => item && item.id === msg.itemId);
+        if (idx === -1) {
+          ws.send(JSON.stringify({ type: 'guest_bag_item_move_result', ok: false, reason: 'item_not_found' }));
+          return;
+        }
+
+        const item = items[idx];
+        if (item.visible === false) {
+          ws.send(JSON.stringify({ type: 'guest_bag_item_move_result', ok: false, reason: 'not_visible' }));
+          return;
+        }
+
+        const incoming = msg.location && typeof msg.location === 'object' ? msg.location : {};
+        const nextKind = incoming.kind === 'canvas' ? 'canvas' : (incoming.kind === 'slot' ? 'slot' : 'bag');
+        const nextBag = String(incoming.bagId || '').toLowerCase();
+        const validBag = nextBag === 'fin' || nextBag === 'nad' || nextBag === 'kat';
+        const bagKey = validBag ? nextBag : 'fin';
+        const nextSlot = String(incoming.slotId || '').toLowerCase();
+        const validSlot = [
+          'head', 'hand1', 'hand2', 'torso', 'legs', 'feet', 'back',
+          'accessoire1', 'accessoire2', 'extra1', 'extra2', 'extra3',
+        ].includes(nextSlot);
+
+        if (nextKind === 'slot') {
+          const slotKey = validSlot ? nextSlot : 'head';
+          const occupied = items.find((other, otherIdx) => (
+            otherIdx !== idx
+            && other
+            && other.location
+            && other.location.kind === 'slot'
+            && String(other.location.bagId || 'fin').toLowerCase() === bagKey
+            && String(other.location.slotId || '').toLowerCase() === slotKey
+          ));
+          if (occupied) {
+            ws.send(JSON.stringify({ type: 'guest_bag_item_move_result', ok: false, reason: 'slot_occupied' }));
+            return;
+          }
+        }
+
+        const next = {
+          ...item,
+          location: {
+            kind: nextKind === 'slot' ? 'slot' : nextKind,
+            bagId: bagKey,
+            slotId: nextKind === 'slot' ? (validSlot ? nextSlot : 'head') : null,
+            x: Number.isFinite(Number(incoming.x)) ? Number(incoming.x) : 40,
+            y: Number.isFinite(Number(incoming.y)) ? Number(incoming.y) : 40,
+          },
+        };
+
+        items[idx] = next;
+        room.state.bagItems = items;
+
+        broadcastGuestState(room);
+        sendToHost(room, { type: 'state_echo', state: room.state });
+        ws.send(JSON.stringify({ type: 'guest_bag_item_move_result', ok: true }));
+        return;
+      }
+
       if (msg.type === 'map_ping') {
         const payload = JSON.stringify({
           type: 'map_ping',
@@ -394,28 +459,73 @@ wss.on('connection', ws => {
           ws.send(JSON.stringify({ type: 'guest_charge_update_result', ok: false, reason: 'not_your_token' }));
           return;
         }
-        const delta = Number.parseInt(msg.delta, 10);
-        if (Number.isNaN(delta) || delta === 0) {
-          ws.send(JSON.stringify({ type: 'guest_charge_update_result', ok: false, reason: 'bad_delta' }));
-          return;
-        }
-
         const before = clampCharge(p.charges);
-        const after = clampCharge(before + delta);
         p.maxCharges = MAX_CHARGES;
-        p.charges = after;
-        p.chargesTurnStartAdd = clampCharge(p.chargesTurnStartAdd);
-        p.chargesTurnEndAdd = clampCharge(p.chargesTurnEndAdd);
+
+        const mode = String(msg.mode || 'delta');
+        if (mode === 'config') {
+          const nextCurrent = Number.parseInt(msg.current, 10);
+          const nextStart = Number.parseInt(msg.startGain, 10);
+          const nextEnd = Number.parseInt(msg.endGain, 10);
+          if (Number.isNaN(nextCurrent) && Number.isNaN(nextStart) && Number.isNaN(nextEnd)) {
+            ws.send(JSON.stringify({ type: 'guest_charge_update_result', ok: false, reason: 'bad_payload', mode: 'config' }));
+            return;
+          }
+          if (!Number.isNaN(nextCurrent)) p.charges = clampCharge(nextCurrent);
+          else p.charges = before;
+          if (!Number.isNaN(nextStart)) p.chargesTurnStartAdd = clampCharge(nextStart);
+          else p.chargesTurnStartAdd = clampCharge(p.chargesTurnStartAdd);
+          if (!Number.isNaN(nextEnd)) p.chargesTurnEndAdd = clampCharge(nextEnd);
+          else p.chargesTurnEndAdd = clampCharge(p.chargesTurnEndAdd);
+        } else {
+          const delta = Number.parseInt(msg.delta, 10);
+          if (Number.isNaN(delta) || delta === 0) {
+            ws.send(JSON.stringify({ type: 'guest_charge_update_result', ok: false, reason: 'bad_delta', mode: 'delta' }));
+            return;
+          }
+          p.charges = clampCharge(before + delta);
+          p.chargesTurnStartAdd = clampCharge(p.chargesTurnStartAdd);
+          p.chargesTurnEndAdd = clampCharge(p.chargesTurnEndAdd);
+        }
+        const after = clampCharge(p.charges);
 
         broadcastGuestState(room);
         sendToHost(room, { type: 'state_echo', state: room.state });
-        ws.send(JSON.stringify({ type: 'guest_charge_update_result', ok: true, before, after }));
+        ws.send(JSON.stringify({
+          type: 'guest_charge_update_result',
+          ok: true,
+          before,
+          after,
+          mode,
+          startGain: clampCharge(p.chargesTurnStartAdd),
+          endGain: clampCharge(p.chargesTurnEndAdd),
+        }));
 
         if (msg.announce !== false && before !== after) {
           const text = `${p.name}: charges ${before} → ${after} (player update)`;
           broadcastToGuests(room, { type: 'charge_announce', text });
           sendToHost(room, { type: 'charge_announce', text });
         }
+        return;
+      }
+
+      if (msg.type === 'guest_end_turn' && ws.mode === 'guest') {
+        const p = room.state.participants.find(pp => pp.id === msg.participantId);
+        if (!p || p.type !== 'player') {
+          ws.send(JSON.stringify({ type: 'guest_end_turn_result', ok: false, reason: 'participant_not_found' }));
+          return;
+        }
+        if (p.assignedTo && !isAssignedTo(p, ws.name)) {
+          ws.send(JSON.stringify({ type: 'guest_end_turn_result', ok: false, reason: 'not_your_token' }));
+          return;
+        }
+        const turnP = room.state.participants[room.state.turnIndex];
+        if (!turnP || turnP.id !== p.id) {
+          ws.send(JSON.stringify({ type: 'guest_end_turn_result', ok: false, reason: 'not_your_turn' }));
+          return;
+        }
+        sendToHost(room, { type: 'guest_end_turn_request', participantId: p.id, fromGuestName: ws.name || 'Guest' });
+        ws.send(JSON.stringify({ type: 'guest_end_turn_result', ok: true, queued: true }));
         return;
       }
 

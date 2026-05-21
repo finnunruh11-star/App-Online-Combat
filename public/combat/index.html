@@ -40,6 +40,35 @@
   canvas.drop-target-ready{outline:2px dashed rgba(245,166,35,.9);outline-offset:4px}
   #canvas-container{position:relative;display:inline-block;line-height:0;}
   #dice-canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;border-radius:8px;}
+  #item-layer{position:absolute;top:0;left:0;width:100%;height:100%;z-index:9;pointer-events:none}
+
+  /* TOP INVENTORY PANEL */
+  #top-inventory{position:absolute;top:0;left:50%;transform:translateX(-50%);width:min(920px,calc(100vw - 380px));max-height:42px;overflow:hidden;background:linear-gradient(180deg,rgba(22,33,62,.98),rgba(15,52,96,.95));border:1px solid var(--border);border-top:none;border-radius:0 0 14px 14px;box-shadow:0 10px 40px rgba(0,0,0,.55);z-index:220;transition:max-height .24s ease}
+  #top-inventory.open{max-height:860px}
+  #inv-handle{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid rgba(255,255,255,.04);cursor:pointer;user-select:none}
+  #inv-handle-title{font-family:'Cinzel',serif;font-size:12px;color:var(--accent2);letter-spacing:.7px;text-transform:uppercase;flex:1}
+  #inv-toggle-icon{font-size:12px;color:var(--text-muted)}
+  #inv-body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
+  #inv-filters{display:grid;grid-template-columns:1.4fr 1fr .8fr .8fr;gap:6px}
+  .inv-bag-wrap{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .inv-bag-col{display:flex;flex-direction:column;gap:5px}
+  .inv-bag-label{font-family:'Cinzel',serif;font-size:12px;color:var(--accent2);letter-spacing:.6px;text-transform:uppercase;text-align:center}
+  .inv-bag-mult{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)}
+  .inv-bag-mult input{height:28px;padding:4px 6px;font-size:12px}
+  .inv-bag-surface{position:relative;height:180px;background:radial-gradient(circle at 20% 18%,rgba(255,255,255,.08),rgba(0,0,0,.08) 40%,rgba(0,0,0,.2) 100%);border:1px dashed rgba(245,166,35,.35);border-radius:10px;overflow:hidden}
+  .inv-bag-surface.drag-over{border-color:rgba(245,166,35,.9);background:radial-gradient(circle at 20% 18%,rgba(245,166,35,.2),rgba(0,0,0,.08) 45%,rgba(0,0,0,.2) 100%)}
+  .inv-bag-weight{font-size:18px;font-weight:800;color:#fbbf24;text-align:center;background:rgba(0,0,0,.2);border:1px solid rgba(251,191,36,.35);border-radius:8px;padding:5px 6px}
+  .inv-slot-wrap{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+  .inv-slot{display:flex;flex-direction:column;gap:2px}
+  .inv-slot-label{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.25px;text-align:center;line-height:1.15;min-height:18px;display:flex;align-items:flex-end;justify-content:center}
+  .inv-slot-well{position:relative;height:34px;background:linear-gradient(180deg,rgba(30,41,59,.5),rgba(15,23,42,.7));border:1px solid rgba(129,140,248,.35);border-radius:7px;overflow:hidden}
+  .inv-slot-well.drag-over{border-color:rgba(129,140,248,.95);background:linear-gradient(180deg,rgba(129,140,248,.22),rgba(15,23,42,.75))}
+  #inv-delete-zone{width:130px;display:none;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:700;color:#f87171;border:1px dashed rgba(248,113,113,.45);border-radius:10px;background:rgba(248,113,113,.08);padding:8px;line-height:1.4}
+  #inv-delete-zone.host-visible{display:flex}
+  #inv-delete-zone.drag-over{background:rgba(248,113,113,.18);border-color:rgba(248,113,113,.95)}
+  .inv-item-sprite{position:absolute;border:1px solid rgba(255,255,255,.16);border-radius:6px;background:#0e1327 center/cover no-repeat;box-shadow:0 3px 9px rgba(0,0,0,.45);cursor:grab;pointer-events:auto}
+  .inv-item-sprite.hidden-by-filter{display:none}
+  .inv-item-sprite.dragging{opacity:.72;cursor:grabbing}
 
   /* DICE PANEL */
   #dice-panel{flex-shrink:0}
@@ -157,7 +186,12 @@
   #editModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:center;justify-content:center}
   #editModal.open{display:flex}
   #editModalBox{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:300px;display:flex;flex-direction:column;gap:10px;box-shadow:0 20px 60px rgba(0,0,0,.8)}
-  #guestDrawPanel{display:none}
+  #guestDrawPanel{display:flex}
+  .guest-tab-buttons{display:flex;gap:4px;background:rgba(0,0,0,.3);padding:4px;border-radius:8px}
+  .guest-tab-btn{flex:1;padding:6px 4px;font-size:11px;font-weight:600;background:transparent;color:var(--text-muted);border:none;border-radius:6px;cursor:pointer}
+  .guest-tab-btn.active{background:var(--surface2);color:var(--text)}
+  .guest-tab-content{display:none;flex-direction:column;gap:10px}
+  .guest-tab-content.active{display:flex}
   #guestDiceRequestPanel{display:flex}
 
   /* ── PING RADIAL MENU ── */
@@ -333,6 +367,18 @@
   .wiki-drop-title{font-family:'Cinzel',serif;font-size:12px;font-weight:700;color:var(--accent2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px}
   .wiki-drop-note{font-size:11px;color:var(--text-muted);line-height:1.35}
   input.wiki-import-file{display:none}
+  #wikiItemList{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;padding-right:2px}
+  #wikiItemList::-webkit-scrollbar{width:4px}
+  #wikiItemList::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .wiki-item-card{display:flex;gap:7px;align-items:center;padding:7px 8px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:8px;cursor:grab}
+  .wiki-item-card:active{cursor:grabbing}
+  .wiki-item-thumb{width:32px;height:32px;border-radius:6px;background:#111827 center/cover no-repeat;border:1px solid rgba(255,255,255,.15);flex-shrink:0}
+  .wiki-item-meta{min-width:0;flex:1}
+  .wiki-item-name{font-size:12px;font-weight:700;color:#c7d2fe;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wiki-item-info{font-size:10px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #itemCreatorModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9300;align-items:center;justify-content:center}
+  #itemCreatorModal.open{display:flex}
+  #itemCreatorBox{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;width:460px;max-width:94vw;display:flex;flex-direction:column;gap:8px;box-shadow:0 18px 56px rgba(0,0,0,.8)}
 
 </style>
 </head>
@@ -394,16 +440,6 @@
 
           <div><label class="field-label">Token Radius (px)</label><input id="tokenSize" type="number" value="15" /></div>
           <button id="addBtn" class="btn-success">➕ Add Character</button>
-
-          <div class="panel-title" style="margin-top:4px">Wiki Templates</div>
-          <button id="importWikiBtn" class="btn-secondary">📥 Import Wiki Enemies</button>
-          <input type="file" id="wikiImportFile" class="wiki-import-file" accept=".json" />
-          <div id="wikiTemplateCount" class="small" style="text-align:center;min-height:16px"></div>
-
-          <div id="wikiDropField" class="wiki-drop-field" title="Drop an enemy from the wiki here to spawn it">
-            <div class="wiki-drop-title">Drop enemy here</div>
-            <div class="wiki-drop-note">Drag a monster card from the wiki and release it here to spawn it in combat.</div>
-          </div>
 
           <div class="panel-title" style="margin-top:4px">Battlefield</div>
           <div class="row">
@@ -524,8 +560,24 @@
               <option value="rect">▢ Rectangle</option>
             </select>
           </div>
+          <div class="row">
+            <div><label class="field-label">Brush Size</label><input id="drawBrushSize" type="number" min="1" max="40" value="2" /></div>
+            <div><label class="field-label">Brush Color</label><input id="drawColor" type="color" value="#6366f1" /></div>
+          </div>
           <label class="checkbox"><input id="fillShapesToggle" type="checkbox" /> Fill shapes</label>
-          <div><label class="field-label">Upload Map Image</label><input type="file" id="imageUpload" accept="image/png,image/jpeg,image/webp" /></div>
+          <div style="padding:7px;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.22);border-radius:6px">
+            <div class="panel-title" style="margin-bottom:5px;color:#4ade80">Canvas Background</div>
+            <div><label class="field-label">Upload Background</label><input type="file" id="backgroundUpload" accept="image/png,image/jpeg,image/webp" /></div>
+            <div><label class="field-label">Fill Mode</label>
+              <select id="backgroundFillMode">
+                <option value="stretch">Stretch</option>
+                <option value="fit">Fit</option>
+                <option value="grid">Grid</option>
+              </select>
+            </div>
+            <button id="clearBackground" class="btn-secondary btn-small" style="margin-top:6px">✕ Clear Background</button>
+          </div>
+          <div><label class="field-label">Upload Image Object</label><input type="file" id="imageUpload" accept="image/png,image/jpeg,image/webp" /></div>
           <div class="row">
             <button id="cancelDraw" class="btn-secondary btn-small">❌ Cancel</button>
             <button id="clearObjects" class="btn-danger btn-small">🗑 Clear All</button>
@@ -576,51 +628,75 @@
 
     <!-- GUEST CONTROLS -->
     <div id="guestControls" style="display:none;flex-direction:column;gap:10px">
-      <div class="panel">
-        <div class="panel-title">Your Token</div>
-        <div id="guestSelectedInfo" class="small">Click your assigned token to select it.</div>
-        <div id="guestTargetInfo">No target — click map to place one.</div>
-        <div><label class="field-label">Extra Move (units)</label><input id="guestExtra" type="number" value="0" placeholder="0" /></div>
-        <button id="guestRequestMove" class="btn-accent">🏃 Request Move</button>
-        <button id="guestClearTarget" class="btn-secondary btn-small">✕ Clear Target</button>
-        <div id="guestMoveStatus" class="small" style="text-align:center;min-height:18px"></div>
+      <div class="panel" style="padding:7px">
+        <div class="guest-tab-buttons">
+          <button id="guestTabBtnMain" class="guest-tab-btn active" data-guest-tab="main">🎮 Play</button>
+          <button id="guestTabBtnDraw" class="guest-tab-btn" data-guest-tab="draw" style="display:none">✏️ Draw</button>
+        </div>
+      </div>
 
-        <div class="panel-title" style="margin-top:4px;color:#60a5fa">Charges</div>
-        <div class="row">
-          <button id="guestChargesDecrease" class="btn-danger btn-small">− Charge</button>
-          <button id="guestChargesIncrease" class="btn-success btn-small">+ Charge</button>
+      <div id="guestTabMain" class="guest-tab-content active">
+        <div class="panel">
+          <div class="panel-title">Your Token</div>
+          <div id="guestSelectedInfo" class="small">Click your assigned token to select it.</div>
+          <div id="guestTargetInfo">No target — click map to place one.</div>
+          <div><label class="field-label">Extra Move (units)</label><input id="guestExtra" type="number" value="0" placeholder="0" /></div>
+          <button id="guestRequestMove" class="btn-accent">🏃 Request Move</button>
+          <button id="guestEndTurn" class="btn-secondary btn-small">⏭ End My Turn</button>
+          <button id="guestClearTarget" class="btn-secondary btn-small">✕ Clear Target</button>
+          <div id="guestMoveStatus" class="small" style="text-align:center;min-height:18px"></div>
+
+          <div class="panel-title" style="margin-top:4px;color:#60a5fa">Charges</div>
+          <div class="row">
+            <button id="guestChargesDecrease" class="btn-danger btn-small">− Charge</button>
+            <button id="guestChargesIncrease" class="btn-success btn-small">+ Charge</button>
+          </div>
+          <div class="row">
+            <div><label class="field-label" style="color:#60a5fa">+ At Turn Start</label><input id="guestChargeStartGain" type="number" min="0" max="10" placeholder="0" /></div>
+            <div><label class="field-label" style="color:#60a5fa">+ At Turn End</label><input id="guestChargeEndGain" type="number" min="0" max="10" placeholder="0" /></div>
+          </div>
+          <button id="guestApplyChargeGains" class="btn-primary btn-small">✓ Apply Charge Gains</button>
+          <label class="checkbox"><input id="guestChargeAnnounceToggle" type="checkbox" checked /> Announce change to everyone</label>
+          <div id="guestChargeStatus" class="small" style="text-align:center;min-height:18px"></div>
         </div>
-        <label class="checkbox"><input id="guestChargeAnnounceToggle" type="checkbox" checked /> Announce change to everyone</label>
-        <div id="guestChargeStatus" class="small" style="text-align:center;min-height:18px"></div>
-      </div>
-      <div class="panel" id="guestDrawPanel">
-        <div class="panel-title">Draw</div>
-        <div class="mode-indicator">✏️ Drawing Enabled by DM</div>
-        <div><label class="field-label">Tool</label>
-          <select id="guestDrawTool">
-            <option value="freehand">✏️ Freehand</option>
-            <option value="circle">⭕ Circle</option>
-            <option value="rect">▢ Rectangle</option>
-          </select>
+
+        <div class="panel" id="guestDiceRequestPanel">
+          <div class="panel-title">🎲 Dice Request</div>
+          <div id="guestDiceRequestNote" class="small">Guests request rolls here; the DM approves them from the pending list.</div>
+          <div class="dice-expr-row">
+            <input id="guestDiceExpr" placeholder="1d20…" />
+            <button id="guestRequestDice" class="btn-accent btn-small">📩 Request</button>
+          </div>
+          <div id="guestDiceStatus" class="small" style="text-align:center;min-height:18px"></div>
         </div>
-        <label class="checkbox"><input id="guestFillToggle" type="checkbox" /> Fill shapes</label>
-        <button id="guestCancelDraw" class="btn-secondary btn-small">❌ Cancel drawing</button>
-        <button id="guestClearMyDrawings" class="btn-danger btn-small">🗑 Clear my drawings</button>
-        <div class="small">💡 Right-click to measure · Double-click any token to ping</div>
-      </div>
-      <div class="panel" id="guestDiceRequestPanel">
-        <div class="panel-title">🎲 Dice Request</div>
-        <div id="guestDiceRequestNote" class="small">Guests request rolls here; the DM approves them from the pending list.</div>
-        <div class="dice-expr-row">
-          <input id="guestDiceExpr" placeholder="1d20…" />
-          <button id="guestRequestDice" class="btn-accent btn-small">📩 Request</button>
+
+        <div class="panel">
+          <div class="panel-title">Enemy Nicknames</div>
+          <div class="small">Right-click an enemy token to set a nickname.</div>
+          <div id="localNickList"></div>
         </div>
-        <div id="guestDiceStatus" class="small" style="text-align:center;min-height:18px"></div>
       </div>
-      <div class="panel">
-        <div class="panel-title">Enemy Nicknames</div>
-        <div class="small">Right-click an enemy token to set a nickname.</div>
-        <div id="localNickList"></div>
+
+      <div id="guestTabDraw" class="guest-tab-content">
+        <div class="panel" id="guestDrawPanel">
+          <div class="panel-title">Draw</div>
+          <div class="mode-indicator">✏️ Drawing Enabled by DM</div>
+          <div><label class="field-label">Tool</label>
+            <select id="guestDrawTool">
+              <option value="freehand">✏️ Freehand</option>
+              <option value="circle">⭕ Circle</option>
+              <option value="rect">▢ Rectangle</option>
+            </select>
+          </div>
+          <div class="row">
+            <div><label class="field-label">Brush Size</label><input id="guestBrushSize" type="number" min="1" max="40" value="2" /></div>
+            <div><label class="field-label">Brush Color</label><input id="guestDrawColor" type="color" value="#818cf8" /></div>
+          </div>
+          <label class="checkbox"><input id="guestFillToggle" type="checkbox" /> Fill shapes</label>
+          <button id="guestCancelDraw" class="btn-secondary btn-small">❌ Cancel drawing</button>
+          <button id="guestClearMyDrawings" class="btn-danger btn-small">🗑 Clear my drawings</button>
+          <div class="small">💡 Double-click any token to ping</div>
+        </div>
       </div>
     </div>
 
@@ -647,8 +723,47 @@
 
 <!-- CANVAS -->
 <div id="battle-wrap">
+  <div id="top-inventory">
+    <div id="inv-handle">
+      <div id="inv-handle-title">Item Bags</div>
+      <div id="inv-toggle-icon">▼</div>
+    </div>
+    <div id="inv-body">
+      <div id="inv-filters">
+        <input id="invFilterName" placeholder="Filter by name" />
+        <input id="invFilterType" placeholder="Type" />
+        <input id="invFilterMinWeight" type="number" step="0.1" placeholder="Min wt" />
+        <input id="invFilterMaxWeight" type="number" step="0.1" placeholder="Max wt" />
+      </div>
+      <div class="inv-bag-wrap">
+        <div class="inv-bag-col">
+          <div class="inv-bag-label">Fin</div>
+          <div class="inv-bag-mult"><span>Weight Reduction</span><input id="invMulFin" type="number" min="0" max="100" step="1" value="0" /><span>%</span></div>
+          <div id="invBagFin" class="inv-bag-surface" data-bag="fin"></div>
+          <div id="invWeightFin" class="inv-bag-weight">Total: 0 Kg</div>
+          <div id="invSlotsFin" class="inv-slot-wrap" data-bag="fin"></div>
+        </div>
+        <div class="inv-bag-col">
+          <div class="inv-bag-label">Nad</div>
+          <div class="inv-bag-mult"><span>Weight Reduction</span><input id="invMulNad" type="number" min="0" max="100" step="1" value="0" /><span>%</span></div>
+          <div id="invBagNad" class="inv-bag-surface" data-bag="nad"></div>
+          <div id="invWeightNad" class="inv-bag-weight">Total: 0 Kg</div>
+          <div id="invSlotsNad" class="inv-slot-wrap" data-bag="nad"></div>
+        </div>
+        <div class="inv-bag-col">
+          <div class="inv-bag-label">Kat</div>
+          <div class="inv-bag-mult"><span>Weight Reduction</span><input id="invMulKat" type="number" min="0" max="100" step="1" value="0" /><span>%</span></div>
+          <div id="invBagKat" class="inv-bag-surface" data-bag="kat"></div>
+          <div id="invWeightKat" class="inv-bag-weight">Total: 0 Kg</div>
+          <div id="invSlotsKat" class="inv-slot-wrap" data-bag="kat"></div>
+        </div>
+      </div>
+      <div id="inv-delete-zone">Drop Here To Delete</div>
+    </div>
+  </div>
   <div id="canvas-container">
     <canvas id="battlefield" width="900" height="700"></canvas>
+    <div id="item-layer"></div>
     <canvas id="dice-canvas"></canvas>
   </div>
 </div>
@@ -781,8 +896,6 @@
   <div id="canvasCtxNewEntity" class="ctx-action" style="color:var(--text)"><span class="ctx-item-icon">🧙</span><span>Create New Entity…</span></div>
   <div id="canvasCtxQuickPlayer" class="ctx-action" style="color:var(--text)"><span class="ctx-item-icon">🛡</span><span>Quick Player <span style="opacity:.55;font-size:11px">(5 in all)</span></span></div>
   <div id="canvasCtxQuickEnemy" class="ctx-action" style="color:var(--text)"><span class="ctx-item-icon">⚔</span><span>Quick Enemy <span style="opacity:.55;font-size:11px">(5 in all)</span></span></div>
-  <div class="ctx-divider"></div>
-  <div id="canvasCtxFromTemplate" class="ctx-action" style="color:var(--text)"><span class="ctx-item-icon">📖</span><span>Spawn from Wiki Template</span></div>
 </div>
 
 <!-- ITEM VIEWER MODAL -->
@@ -810,17 +923,6 @@
       <button id="enemyDetailsClose">✕</button>
     </div>
     <div id="enemyDetailsBody"></div>
-  </div>
-</div>
-
-<!-- WIKI TEMPLATE SELECTOR MODAL -->
-<div id="wikiTemplateSelector">
-  <div id="wikiTemplateSelectorBox">
-    <div id="wikiTemplateSelectorHeader">
-      <h3>📖 Select Enemy Template</h3>
-      <button id="wikiTemplateSelectorClose">✕</button>
-    </div>
-    <div id="wikiTemplateList"></div>
   </div>
 </div>
 
@@ -879,6 +981,26 @@
     <div style="display:flex;gap:10px;justify-content:flex-end">
       <button id="uiPromptCancel" class="btn-secondary">✕ Cancel</button>
       <button id="uiPromptOk" class="btn-success">✓ OK</button>
+    </div>
+  </div>
+</div>
+
+<div id="itemCreatorModal">
+  <div id="itemCreatorBox">
+    <div class="panel-title">Create Wiki Item</div>
+    <div class="row">
+      <div><label class="field-label">Name</label><input id="newItemName" /></div>
+      <div><label class="field-label">Type</label><input id="newItemType" /></div>
+    </div>
+    <div class="row">
+      <div><label class="field-label">Weight</label><input id="newItemWeight" type="number" step="0.1" /></div>
+      <div><label class="field-label">Size</label><input id="newItemSize" placeholder="tiny/small/40" /></div>
+    </div>
+    <div><label class="field-label">Image URL</label><input id="newItemImage" placeholder="https://... or data:image/..." /></div>
+    <div><label class="field-label">Description</label><textarea id="newItemDescription" rows="4"></textarea></div>
+    <div class="row">
+      <button id="itemCreatorCancel" class="btn-secondary">✕ Cancel</button>
+      <button id="itemCreatorSave" class="btn-success">✓ Save Item</button>
     </div>
   </div>
 </div>

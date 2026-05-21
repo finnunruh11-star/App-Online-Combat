@@ -67,12 +67,35 @@ let pendingInitiativeUpdate = false;
    STATE
 ================================================================ */
 let participants=[], objects=[], turnIndex=0, pixelsPerUnit=20;
+let backgroundImageSrc='', backgroundFillMode='stretch', backgroundImageEl=null;
 let guestDrawEnabled=false, guestInitiativeEnabled=false, guestDiceEnabled=false, guestDiceThrowEnabled=false;
 let initiativeDisplayOrder='initiative'; // 'initiative' | 'alpha'
 let roundNumber=0;
+let bagItems=[];
+let wikiItemTemplates=[];
+let inventoryFilters={name:'',type:'',minWeight:'',maxWeight:''};
+let draggingInvItem=null;
+const BAG_IDS=['fin','nad','kat'];
+const INVENTORY_SLOT_DEFS=[
+  {id:'head',label:'head'},
+  {id:'hand1',label:'hand'},
+  {id:'hand2',label:'hand'},
+  {id:'torso',label:'torso'},
+  {id:'legs',label:'legs'},
+  {id:'feet',label:'feet'},
+  {id:'back',label:'back'},
+  {id:'accessoire1',label:'accessoire'},
+  {id:'accessoire2',label:'accessoire'},
+  {id:'extra1',label:'extra slot just in case'},
+  {id:'extra2',label:'extra slot just in case'},
+  {id:'extra3',label:'extra slot just in case'},
+];
+const INVENTORY_SLOT_IDS=INVENTORY_SLOT_DEFS.map(s=>s.id);
+let bagWeightMultipliers={fin:0,nad:0,kat:0};
 // host
 let activeParticipant=null, selectedObject=null, selectedObjects=[];
 let drawMode=false, drawTool='freehand', isDrawing=false, currentDrawing=null;
+let drawBrushSize=2, drawStrokeColor='#6366f1';
 let hostFreeMoveMode=false; // drag tokens/objects without movespeed cost
 let draggingParticipantRef=null, participantDragOffset={x:0,y:0}; // for free-move drag
 let draggingDie=false; // physically throwing a 3D die
@@ -83,7 +106,8 @@ let connectedGuests=[], editingParticipant=null;
 let canvasSpawnPos={x:0,y:0}; // position for right-click entity spawn
 // guest
 let localSelection=null, lastTargetPos=null, imgCache={}, avatarCache={};
-let guestDrawMode=false, guestIsDrawing=false, guestCurrentDrawing=null, guestMeasuring=null;
+let guestIsDrawing=false, guestCurrentDrawing=null, guestMeasuring=null;
+let guestBrushSize=2, guestStrokeColor='#818cf8', guestActiveTab='main';
 let pendingNewPortrait=null, pendingEditPortrait=null, portraitEditorState=null;
 // anim
 let animLoopRunning=false;
@@ -112,8 +136,10 @@ const selectedSanityNameEl=document.getElementById('selectedSanityName');
 const currentChargesEl=document.getElementById('currentCharges'), chargeStartGainEl=document.getElementById('chargeStartGain'), chargeEndGainEl=document.getElementById('chargeEndGain');
 const chargesDecreaseBtn=document.getElementById('chargesDecrease'), chargesIncreaseBtn=document.getElementById('chargesIncrease'), applyChargesBtn=document.getElementById('applyCharges'), announceChargesBtn=document.getElementById('announceCharges');
 const drawToolSelect=document.getElementById('drawTool'), fillShapesToggle=document.getElementById('fillShapesToggle');
+const drawBrushSizeEl=document.getElementById('drawBrushSize'), drawColorEl=document.getElementById('drawColor');
 const cancelDrawBtn=document.getElementById('cancelDraw'), clearObjectsBtn=document.getElementById('clearObjects');
 const selectedObjectLabel=document.getElementById('selectedObjectLabel'), deleteObjectBtn=document.getElementById('deleteObject'), toggleDragObjectBtn=document.getElementById('toggleDragObject');
+const backgroundUploadEl=document.getElementById('backgroundUpload'), backgroundFillModeEl=document.getElementById('backgroundFillMode'), clearBackgroundBtn=document.getElementById('clearBackground');
 const imageUpload=document.getElementById('imageUpload'), guestDrawToggle=document.getElementById('guestDrawToggle');
 const guestDiceToggle=document.getElementById('guestDiceToggle'), guestDiceThrowToggle=document.getElementById('guestDiceThrowToggle');
 const manualCircleUnitsEl=document.getElementById('manualCircleUnits'), showManualCircleBtn=document.getElementById('showManualCircle');
@@ -127,7 +153,9 @@ const cfgPixelsPerUnit=document.getElementById('cfgPixelsPerUnit'), cfgTolerance
 const pendingList=document.getElementById('pendingList'), guestListEl=document.getElementById('guestList'), assignmentList=document.getElementById('assignmentList'), saveAssignmentsBtn=document.getElementById('saveAssignments');
 const guestSelectedInfo=document.getElementById('guestSelectedInfo'), guestTargetInfo=document.getElementById('guestTargetInfo');
 const guestExtraEl=document.getElementById('guestExtra'), guestRequestMoveBtn=document.getElementById('guestRequestMove'), guestClearTargetBtn=document.getElementById('guestClearTarget'), guestMoveStatus=document.getElementById('guestMoveStatus');
+const guestEndTurnBtn=document.getElementById('guestEndTurn');
 const guestChargesDecreaseBtn=document.getElementById('guestChargesDecrease'), guestChargesIncreaseBtn=document.getElementById('guestChargesIncrease');
+const guestChargeStartGainEl=document.getElementById('guestChargeStartGain'), guestChargeEndGainEl=document.getElementById('guestChargeEndGain'), guestApplyChargeGainsBtn=document.getElementById('guestApplyChargeGains');
 const guestChargeAnnounceToggle=document.getElementById('guestChargeAnnounceToggle'), guestChargeStatusEl=document.getElementById('guestChargeStatus');
 const diceRandomizeColorEl=document.getElementById('diceRandomizeColor'), diceColorEl=document.getElementById('diceColor');
 const diceSizeEl=document.getElementById('diceSize'), diceVelocityEl=document.getElementById('diceVelocity'), diceSpinEl=document.getElementById('diceSpin'), diceBounceEl=document.getElementById('diceBounce');
@@ -135,7 +163,10 @@ const diceSizeValEl=document.getElementById('diceSizeVal'), diceVelocityValEl=do
 const diceColorSwatchLabelEl=document.getElementById('diceColorSwatchLabel'), diceResetSettingsBtn=document.getElementById('diceResetSettings');
 const localNickList=document.getElementById('localNickList'), guestDrawPanel=document.getElementById('guestDrawPanel');
 const guestDrawToolEl=document.getElementById('guestDrawTool'), guestFillToggle=document.getElementById('guestFillToggle');
+const guestBrushSizeEl=document.getElementById('guestBrushSize'), guestDrawColorEl=document.getElementById('guestDrawColor');
 const guestCancelDrawBtn=document.getElementById('guestCancelDraw'), guestClearMyDrawingsBtn=document.getElementById('guestClearMyDrawings');
+const guestTabBtnMain=document.getElementById('guestTabBtnMain'), guestTabBtnDraw=document.getElementById('guestTabBtnDraw');
+const guestTabMain=document.getElementById('guestTabMain'), guestTabDraw=document.getElementById('guestTabDraw');
 
 /* ================================================================
    UI DIALOGS — Electron-compatible replacements for alert/confirm/prompt
@@ -151,6 +182,56 @@ function clampChargeValue(v){
   const n=parseInt(v);
   if(isNaN(n))return 0;
   return Math.max(0,Math.min(MAX_CHARGES,n));
+}
+function clampBrushValue(v){
+  const n=parseInt(v,10);
+  if(Number.isNaN(n))return 2;
+  return Math.max(1,Math.min(40,n));
+}
+function hexToRgba(hex,alpha){
+  const m=/^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec((hex||'').trim());
+  if(!m)return `rgba(99,102,241,${alpha})`;
+  return `rgba(${parseInt(m[1],16)},${parseInt(m[2],16)},${parseInt(m[3],16)},${alpha})`;
+}
+function syncHostDrawControls(){
+  drawBrushSize=clampBrushValue(drawBrushSizeEl?.value);
+  drawStrokeColor=drawColorEl?.value||'#6366f1';
+}
+function syncGuestDrawControls(){
+  guestBrushSize=clampBrushValue(guestBrushSizeEl?.value);
+  guestStrokeColor=guestDrawColorEl?.value||'#818cf8';
+}
+function switchGuestTab(tabName){
+  if(!guestTabMain||!guestTabDraw||!guestTabBtnMain||!guestTabBtnDraw)return;
+  const next=(tabName==='draw'&&guestDrawEnabled)?'draw':'main';
+  guestActiveTab=next;
+  guestTabBtnMain.classList.toggle('active',next==='main');
+  guestTabBtnDraw.classList.toggle('active',next==='draw');
+  guestTabMain.classList.toggle('active',next==='main');
+  guestTabDraw.classList.toggle('active',next==='draw');
+  if(next!=='draw'){guestIsDrawing=false;guestCurrentDrawing=null;}
+  drawAll();
+}
+function refreshGuestDrawAccess(){
+  if(!guestTabBtnDraw||!guestTabDraw)return;
+  guestTabBtnDraw.style.display=guestDrawEnabled?'':'none';
+  guestTabDraw.style.display=guestDrawEnabled?'':'none';
+  if(!guestDrawEnabled&&guestActiveTab==='draw')switchGuestTab('main');
+}
+function ensureBackgroundImageLoaded(){
+  if(!backgroundImageSrc){backgroundImageEl=null;return null;}
+  if(backgroundImageEl&&backgroundImageEl.src===backgroundImageSrc)return backgroundImageEl;
+  const img=new Image();
+  img.onload=()=>drawAll();
+  img.src=backgroundImageSrc;
+  backgroundImageEl=img;
+  return img;
+}
+function setBackgroundImage(src){
+  backgroundImageSrc=src||'';
+  ensureBackgroundImageLoaded();
+  drawAll();
+  if(isHost)syncToServer();
 }
 function clampChargeGain(v){
   const n=parseInt(v);
@@ -198,6 +279,28 @@ function applyTurnChargeGain(p,phase){
   if(add<=0)return false;
   const label=phase==='start'?`turn start +${add}`:`turn end +${add}`;
   return applyParticipantCharge(p,(p.charges||0)+add,label,true);
+}
+function refreshGuestChargeControls(){
+  if(isHost)return;
+  if(!guestChargeStartGainEl||!guestChargeEndGainEl)return;
+  const p=participants.find(pp=>pp.id===localSelection);
+  const canEdit=!!p&&p.type==='player';
+  const isMyTurn=!!canEdit&&participants[turnIndex]?.id===p.id;
+  if(guestChargesDecreaseBtn)guestChargesDecreaseBtn.disabled=!canEdit;
+  if(guestChargesIncreaseBtn)guestChargesIncreaseBtn.disabled=!canEdit;
+  if(guestApplyChargeGainsBtn)guestApplyChargeGainsBtn.disabled=!canEdit;
+  if(guestEndTurnBtn){
+    guestEndTurnBtn.disabled=!isMyTurn;
+    guestEndTurnBtn.textContent=isMyTurn?'⏭ End My Turn':'⏭ End My Turn (wait)';
+  }
+  if(canEdit){
+    ensureParticipantChargeFields(p);
+    if(document.activeElement!==guestChargeStartGainEl)guestChargeStartGainEl.value=String(p.chargesTurnStartAdd||0);
+    if(document.activeElement!==guestChargeEndGainEl)guestChargeEndGainEl.value=String(p.chargesTurnEndAdd||0);
+  }else{
+    if(document.activeElement!==guestChargeStartGainEl)guestChargeStartGainEl.value='';
+    if(document.activeElement!==guestChargeEndGainEl)guestChargeEndGainEl.value='';
+  }
 }
 let _confirmCb=null;
 function showConfirm(msg,onOk,onCancel){
@@ -271,6 +374,8 @@ function initUI() {
     document.getElementById('guestControls').style.display='flex';
     document.getElementById('guestDiceRequestPanel')?.style && (document.getElementById('guestDiceRequestPanel').style.display='flex');
     roleBadge.textContent=GUEST_NAME; roleBadge.className='role-badge guest';
+    switchGuestTab('main');
+    refreshGuestDrawAccess();
     loadLocalNicknamesUI();
     updateGuestDicePanel();
     // Guests always see the initiative sidebar — no collapsing
@@ -279,6 +384,7 @@ function initUI() {
   // Item viewer modal close
   document.getElementById('itemViewerClose').addEventListener('click', closeItemViewer);
   document.getElementById('itemViewerModal').addEventListener('click', e=>{ if(e.target===document.getElementById('itemViewerModal'))closeItemViewer(); });
+  initInventoryUI();
 }
 initUI();
 
@@ -694,8 +800,36 @@ if (msg.type === 'dice_roll_result') {
     return;
   }
   if(msg.type==='guest_charge_update_result'&&!isHost){
-    if(msg.ok===true)setGuestChargeStatus('✅ Charges updated.','ok');
+    if(msg.ok===true&&msg.mode==='config')setGuestChargeStatus('✅ Charge gain settings updated.','ok');
+    else if(msg.ok===true)setGuestChargeStatus('✅ Charges updated.','ok');
     else setGuestChargeStatus('❌ Charge update rejected.','error');
+    refreshGuestChargeControls();
+    return;
+  }
+  if(msg.type==='guest_end_turn_result'&&!isHost){
+    if(msg.ok===true){
+      guestMoveStatus.textContent='⏭ End turn request sent.';
+      guestMoveStatus.style.color='var(--accent2)';
+    }else{
+      const r={not_your_token:"That's not your token.",not_your_turn:"It's not your turn.",participant_not_found:'Token not found.'};
+      guestMoveStatus.textContent='❌ '+(r[msg.reason]||'Could not end turn.');
+      guestMoveStatus.style.color='var(--danger)';
+    }
+    setTimeout(()=>{guestMoveStatus.textContent='';},4000);
+    refreshGuestChargeControls();
+    return;
+  }
+  if(msg.type==='guest_end_turn_request'&&isHost){
+    const requestedId=msg.participantId;
+    if(!participants.length)return;
+    const current=participants[turnIndex];
+    if(!current||current.id!==requestedId)return;
+    nextBtn.click();
+    if(msg.fromGuestName)showAlert(`⏭ ${msg.fromGuestName} ended their turn.`);
+    return;
+  }
+  if(msg.type==='guest_bag_item_move_result'&&!isHost){
+    if(msg.ok!==true)showAlert('❌ Item move rejected.');
     return;
   }
   if (msg.type==='host_disconnected'&&!isHost){setConnStatus('error','DM disconnected');currentTurnBanner.style.display='none';return;}
@@ -736,6 +870,14 @@ function applyHostState(state) {
   if(state.canvasWidth&&state.canvasHeight){canvas.width=state.canvasWidth;canvas.height=state.canvasHeight;battleWidthEl.value=state.canvasWidth;battleHeightEl.value=state.canvasHeight;}
   if(state.moveToleranceUnits!==undefined)cfgTolerance.value=state.moveToleranceUnits;
   if(state.autoApproveIfWithinTolerance!==undefined)cfgAutoApprove.checked=state.autoApproveIfWithinTolerance;
+  if(state.backgroundImageSrc!==undefined){
+    backgroundImageSrc=state.backgroundImageSrc||'';
+    ensureBackgroundImageLoaded();
+  }
+  if(state.backgroundFillMode!==undefined){
+    backgroundFillMode=state.backgroundFillMode||'stretch';
+    if(backgroundFillModeEl)backgroundFillModeEl.value=backgroundFillMode;
+  }
   if(state.guestDrawEnabled!==undefined){guestDrawEnabled=state.guestDrawEnabled;guestDrawToggle.checked=guestDrawEnabled;}
   if(state.guestDiceEnabled!==undefined){guestDiceEnabled=state.guestDiceEnabled;if(guestDiceToggle)guestDiceToggle.checked=guestDiceEnabled;}
   if(state.guestDiceThrowEnabled!==undefined){guestDiceThrowEnabled=state.guestDiceThrowEnabled;if(guestDiceThrowToggle)guestDiceThrowToggle.checked=guestDiceThrowEnabled;}
@@ -759,10 +901,12 @@ function applyHostState(state) {
     if(diceBounceEl&&state.diceSettings.bounciness!==undefined)diceBounceEl.value=state.diceSettings.bounciness;
     updateDiceUiLabels();
   }
+  if(state.bagItems!==undefined)bagItems=normalizeBagItems(state.bagItems);
+  if(state.bagWeightMultipliers!==undefined)bagWeightMultipliers=normalizeBagWeightMultipliers(state.bagWeightMultipliers);
   if(!isHost && state.latestDicePrompt) showDicePrompt(state.latestDicePrompt.expression||state.latestDicePrompt.expr||'1d20', state.latestDicePrompt.id||state.latestDicePrompt.promptId);
   if(state.diceState) applyIncomingDiceState(state.diceState);
   if(activeParticipant)activeParticipant=participants.find(p=>p.id===activeParticipant.id)||null;
-  checkAndStartAnimLoop();updateInitiativeList();renderAssignmentList();
+  checkAndStartAnimLoop();updateInitiativeList();renderAssignmentList();renderInventory();
 }
 
 function applyGuestState(state) {
@@ -772,6 +916,14 @@ function applyGuestState(state) {
   turnIndex=state.turnIndex||0;
   if(state.pixelsPerUnit)pixelsPerUnit=state.pixelsPerUnit;
   if(state.canvasWidth&&state.canvasHeight){canvas.width=state.canvasWidth;canvas.height=state.canvasHeight;}
+  if(state.backgroundImageSrc!==undefined){
+    backgroundImageSrc=state.backgroundImageSrc||'';
+    ensureBackgroundImageLoaded();
+  }
+  if(state.backgroundFillMode!==undefined){
+    backgroundFillMode=state.backgroundFillMode||'stretch';
+    if(backgroundFillModeEl)backgroundFillModeEl.value=backgroundFillMode;
+  }
   if(state.diceSettings!==undefined){
     window.combatDice?.applySettings?.(state.diceSettings);
     if(diceRandomizeColorEl&&state.diceSettings.randomizeColors!==undefined)diceRandomizeColorEl.checked=!!state.diceSettings.randomizeColors;
@@ -784,8 +936,8 @@ function applyGuestState(state) {
   }
   if(state.guestDrawEnabled!==undefined){
     guestDrawEnabled=state.guestDrawEnabled;
-    guestDrawPanel.style.display=guestDrawEnabled?'flex':'none';
-    if(!guestDrawEnabled){guestDrawMode=false;guestIsDrawing=false;guestCurrentDrawing=null;}
+    refreshGuestDrawAccess();
+    if(!guestDrawEnabled){guestIsDrawing=false;guestCurrentDrawing=null;}
   }
   if(state.guestDiceEnabled!==undefined){
     guestDiceEnabled=state.guestDiceEnabled;
@@ -793,6 +945,8 @@ function applyGuestState(state) {
     updateGuestDicePanel();
     document.getElementById('guestControls')?.style && (document.getElementById('guestControls').style.display='flex');
   }
+  if(state.bagItems!==undefined)bagItems=normalizeBagItems(state.bagItems);
+  if(state.bagWeightMultipliers!==undefined)bagWeightMultipliers=normalizeBagWeightMultipliers(state.bagWeightMultipliers);
   // Guests always see initiative sidebar; sync sort order
   if(state.initiativeDisplayOrder!==undefined){
     initiativeDisplayOrder=state.initiativeDisplayOrder;
@@ -809,8 +963,9 @@ function applyGuestState(state) {
     localSelection=null;guestSelectedInfo.textContent='Click a player token to select it.';
   }
 
+  refreshGuestChargeControls();
   updateTurnBanner(state.publicTurnName);
-  checkAndStartAnimLoop();updateRightInitiative();drawAll();
+  checkAndStartAnimLoop();updateRightInitiative();drawAll();renderInventory();
 }
 
 /* ================================================================
@@ -865,6 +1020,7 @@ function syncToServer(){
   if(!isHost)return;
   send({type:'host_full_update',participants:participants.map(p=>({...p})),objects:serializeObjects(objects),
     turnIndex,canvasWidth:canvas.width,canvasHeight:canvas.height,pixelsPerUnit,
+    backgroundImageSrc,backgroundFillMode,
     moveToleranceUnits:parseFloat(cfgTolerance.value)||0.25,
     autoApproveIfWithinTolerance:cfgAutoApprove.checked,
     guestDrawEnabled:guestDrawToggle.checked,
@@ -874,7 +1030,9 @@ function syncToServer(){
     initiativeDisplayOrder,
     diceSettings:window.combatDice?.getSettings?.()||clampDiceSettings(),
     diceState:getCurrentSharedDiceState(),
-    latestDicePrompt:lastDicePrompt});
+    latestDicePrompt:lastDicePrompt,
+    bagItems:normalizeBagItems(bagItems),
+    bagWeightMultipliers:normalizeBagWeightMultipliers(bagWeightMultipliers)});
 }
 
 /* ================================================================
@@ -1164,6 +1322,26 @@ if(isHost){
    HOST: ADD PARTICIPANT
 ================================================================ */
 if(isHost){
+  function advanceTurn(){
+    if(!participants.length){showAlert('Start combat first.');return false;}
+    const previous=activeParticipant;
+    if(previous){
+      previous.movedUnits=0;
+      applyTurnChargeGain(previous,'end');
+    }
+    const newIndex=(turnIndex+1)%participants.length;
+    if(newIndex===0)roundNumber++;
+    turnIndex=newIndex;
+    activeParticipant=participants[turnIndex];
+    if(activeParticipant){
+      activeParticipant.movedUnits=0;
+      applyTurnChargeGain(activeParticipant,'start');
+    }
+    checkRemindersForTurn(turnIndex);
+    updateInitiativeList();refreshHpControls();drawAll();checkAndStartAnimLoop();syncToServer();
+    return true;
+  }
+
   addBtn.addEventListener('click',()=>{
     const n=nameEl.value.trim(),ini=parseInt(initiativeEl.value);
     if(!n||isNaN(ini)){showAlert('Enter a valid name and initiative.');return;}
@@ -1197,22 +1375,7 @@ if(isHost){
 
   // ⏭ Next — resets current participant's movement, advance turn
   nextBtn.addEventListener('click',()=>{
-    if(!participants.length){showAlert('Start combat first.');return;}
-    const previous=activeParticipant;
-    if(previous){
-      previous.movedUnits=0;
-      applyTurnChargeGain(previous,'end');
-    }
-    const newIndex=(turnIndex+1)%participants.length;
-    if(newIndex===0)roundNumber++;
-    turnIndex=newIndex;
-    activeParticipant=participants[turnIndex];
-    if(activeParticipant){
-      activeParticipant.movedUnits=0;
-      applyTurnChargeGain(activeParticipant,'start');
-    }
-    checkRemindersForTurn(turnIndex);
-    updateInitiativeList();refreshHpControls();drawAll();checkAndStartAnimLoop();syncToServer();
+    advanceTurn();
   });
 
   // HP
@@ -1256,6 +1419,8 @@ if(isHost){
 
   // Draw
   drawToolSelect.addEventListener('change',()=>drawTool=drawToolSelect.value);
+  drawBrushSizeEl?.addEventListener('input',syncHostDrawControls);
+  drawColorEl?.addEventListener('input',syncHostDrawControls);
   fillShapesToggle.addEventListener('change',drawAll);
   cancelDrawBtn.addEventListener('click',()=>{isDrawing=false;currentDrawing=null;drawAll();});
   clearObjectsBtn.addEventListener('click',()=>{showConfirm('Clear all drawn objects?',()=>{objects=[];selectedObject=null;selectedObjects=[];updateSelectedObjectUI();drawAll();syncToServer();});});
@@ -1264,6 +1429,20 @@ if(isHost){
   guestDrawToggle.addEventListener('change',()=>{const en=guestDrawToggle.checked;if(!en&&objects.some(o=>o.guestDrawn)){showConfirm('Clear guest drawings too?',()=>{objects=objects.filter(o=>!o.guestDrawn);drawAll();syncToServer();},()=>syncToServer());}else{syncToServer();}});
   guestDiceToggle.addEventListener('change',()=>syncToServer());
   guestDiceThrowToggle.addEventListener('change',()=>syncToServer());
+  backgroundFillModeEl?.addEventListener('change',()=>{
+    backgroundFillMode=backgroundFillModeEl.value||'stretch';
+    drawAll();
+    syncToServer();
+  });
+  clearBackgroundBtn?.addEventListener('click',()=>setBackgroundImage(''));
+  backgroundUploadEl?.addEventListener('change',e=>{
+    const file=e.target.files?.[0];
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=re=>setBackgroundImage(String(re.target?.result||''));
+    reader.readAsDataURL(file);
+    e.target.value='';
+  });
 
   // Free Move Tool toggle
   const toggleFreeMoveBtn=document.getElementById('toggleFreeMoveBtn');
@@ -1646,7 +1825,7 @@ function updateRightInitiative(){
 
     // Click to select own token
     if(p.type==='player'&&(!p.assignedTo||p.assignedTo===GUEST_NAME)){
-      div.addEventListener('click',()=>{localSelection=p.id;guestSelectedInfo.textContent=`🎮 Selected: ${p.publicDisplayName}`;drawAll();});
+      div.addEventListener('click',()=>{localSelection=p.id;guestSelectedInfo.textContent=`🎮 Selected: ${p.publicDisplayName}`;refreshGuestChargeControls();drawAll();});
     }
     container.appendChild(div);
   });
@@ -1795,8 +1974,33 @@ if(!isHost){
     if(!localSelection)return setGuestChargeStatus('Select your token first.','warn');
     const p=participants.find(pp=>pp.id===localSelection);
     if(!p||p.type!=='player')return setGuestChargeStatus('Only player tokens can use charges.','warn');
-    send({type:'guest_charge_update',participantId:localSelection,delta,announce:guestChargeAnnounceToggle?.checked!==false});
+    send({type:'guest_charge_update',participantId:localSelection,mode:'delta',delta,announce:guestChargeAnnounceToggle?.checked!==false});
     setGuestChargeStatus('⏳ Charge update sent…');
+  }
+  function requestGuestChargeConfig(){
+    if(!localSelection)return setGuestChargeStatus('Select your token first.','warn');
+    const p=participants.find(pp=>pp.id===localSelection);
+    if(!p||p.type!=='player')return setGuestChargeStatus('Only player tokens can use charges.','warn');
+    const startGain=parseInt(guestChargeStartGainEl?.value,10);
+    const endGain=parseInt(guestChargeEndGainEl?.value,10);
+    if(Number.isNaN(startGain)&&Number.isNaN(endGain))return setGuestChargeStatus('Enter at least one turn gain value.','warn');
+    send({
+      type:'guest_charge_update',
+      participantId:localSelection,
+      mode:'config',
+      startGain:Number.isNaN(startGain)?undefined:startGain,
+      endGain:Number.isNaN(endGain)?undefined:endGain,
+      announce:guestChargeAnnounceToggle?.checked!==false,
+    });
+    setGuestChargeStatus('⏳ Charge settings update sent…');
+  }
+  function requestGuestEndTurn(){
+    if(!localSelection)return setGuestStatus('Select your token first.','warn');
+    const p=participants.find(pp=>pp.id===localSelection);
+    if(!p||p.type!=='player')return setGuestStatus('Only player tokens can end player turns.','warn');
+    if(participants[turnIndex]?.id!==p.id)return setGuestStatus("It's not your turn.",'warn');
+    send({type:'guest_end_turn',participantId:localSelection});
+    setGuestStatus('⏳ End turn request sent…');
   }
   guestRequestMoveBtn.addEventListener('click',()=>{
     if(!localSelection)return setGuestStatus('Select your token first.','warn');
@@ -1806,9 +2010,14 @@ if(!isHost){
   });
   guestChargesDecreaseBtn?.addEventListener('click',()=>requestGuestChargeDelta(-1));
   guestChargesIncreaseBtn?.addEventListener('click',()=>requestGuestChargeDelta(1));
+  guestApplyChargeGainsBtn?.addEventListener('click',requestGuestChargeConfig);
+  guestEndTurnBtn?.addEventListener('click',requestGuestEndTurn);
   guestClearTargetBtn.addEventListener('click',()=>{lastTargetPos=null;updateGuestTargetInfo();drawAll();});
-  guestDrawToolEl.addEventListener('change',()=>{});
-  guestCancelDrawBtn.addEventListener('click',()=>{guestDrawMode=false;guestIsDrawing=false;guestCurrentDrawing=null;drawAll();});
+  guestTabBtnMain?.addEventListener('click',()=>switchGuestTab('main'));
+  guestTabBtnDraw?.addEventListener('click',()=>switchGuestTab('draw'));
+  guestBrushSizeEl?.addEventListener('input',syncGuestDrawControls);
+  guestDrawColorEl?.addEventListener('input',syncGuestDrawControls);
+  guestCancelDrawBtn.addEventListener('click',()=>{guestIsDrawing=false;guestCurrentDrawing=null;drawAll();});
   guestClearMyDrawingsBtn.addEventListener('click',()=>{showConfirm('Clear all your drawings?',()=>{objects=objects.filter(o=>!(o.guestDrawn&&o.drawnBy===GUEST_NAME));send({type:'guest_clear_mine',name:GUEST_NAME});drawAll();});});
   function setGuestStatus(msg,type){guestMoveStatus.textContent=msg;guestMoveStatus.style.color=type==='warn'?'var(--accent2)':'var(--text-muted)';setTimeout(()=>{guestMoveStatus.textContent='';},4000);}
 }
@@ -1858,6 +2067,7 @@ function drawAll(){
     ctx.save();
     ctx.translate(Math.random()*intensity-intensity/2, Math.random()*intensity-intensity/2);
   }
+  drawBackgroundImage();
   drawGrid();
   objects.forEach(o=>drawObject(o,(isHost&&selectedObjects.includes(o.id))||(isHost&&selectedObject&&selectedObject.id===o.id)));
   if(isHost&&selectionRect)drawSelectionRect();
@@ -1870,6 +2080,31 @@ function drawAll(){
   if(isHost&&isDrawing&&currentDrawing)drawCurrentPreview(currentDrawing);
   if(!isHost&&guestIsDrawing&&guestCurrentDrawing)drawCurrentPreview(guestCurrentDrawing);
   if(shaking)ctx.restore();
+  renderCanvasInventoryLayer();
+}
+
+function drawBackgroundImage(){
+  if(!backgroundImageSrc)return;
+  const img=ensureBackgroundImageLoaded();
+  if(!img||!img.complete||!img.naturalWidth||!img.naturalHeight)return;
+  const cw=canvas.width,ch=canvas.height;
+  if(backgroundFillMode==='grid'){
+    const p=ctx.createPattern(img,'repeat');
+    if(!p)return;
+    ctx.save();
+    ctx.fillStyle=p;
+    ctx.fillRect(0,0,cw,ch);
+    ctx.restore();
+    return;
+  }
+  if(backgroundFillMode==='fit'){
+    const s=Math.max(cw/img.naturalWidth,ch/img.naturalHeight);
+    const dw=img.naturalWidth*s,dh=img.naturalHeight*s;
+    const dx=(cw-dw)/2,dy=(ch-dh)/2;
+    ctx.drawImage(img,dx,dy,dw,dh);
+    return;
+  }
+  ctx.drawImage(img,0,0,cw,ch);
 }
 
 function drawGrid(){
@@ -2033,9 +2268,12 @@ function drawMeasureLine(entity,cx,cy,wholeNumbers){
 }
 
 function drawObject(o,highlight=false){
-  ctx.save();ctx.lineWidth=highlight?2.5:(o.guestDrawn?1:1.5);
-  ctx.strokeStyle=highlight?'#f5a623':(o.guestDrawn?'rgba(129,140,248,.7)':'rgba(255,255,255,.5)');
-  ctx.fillStyle=o.filled?(o.guestDrawn?'rgba(129,140,248,.2)':'rgba(99,102,241,.25)'):'rgba(255,255,255,.04)';
+  const baseStroke=o.strokeColor||(o.guestDrawn?'rgba(129,140,248,.7)':'rgba(255,255,255,.5)');
+  const baseFill=o.fillColor||(o.guestDrawn?'rgba(129,140,248,.2)':'rgba(99,102,241,.25)');
+  const baseWidth=Math.max(1,Number(o.lineWidth)||1.5);
+  ctx.save();ctx.lineWidth=highlight?Math.max(2.5,baseWidth+0.8):baseWidth;
+  ctx.strokeStyle=highlight?'#f5a623':baseStroke;
+  ctx.fillStyle=o.filled?baseFill:'rgba(255,255,255,.04)';
   if(o.type==='rect'){ctx.beginPath();ctx.rect(Math.min(o.x,o.x+o.w),Math.min(o.y,o.y+o.h),Math.abs(o.w),Math.abs(o.h));if(o.filled)ctx.fill();ctx.stroke();}
   else if(o.type==='circle'){const cx=o.cx??o.x,cy=o.cy??o.y;ctx.beginPath();ctx.arc(cx,cy,o.r||0,0,Math.PI*2);if(o.filled)ctx.fill();ctx.stroke();}
   else if(o.type==='freehand'){ctx.beginPath();o.points.forEach((pt,i)=>i===0?ctx.moveTo(pt.x,pt.y):ctx.lineTo(pt.x,pt.y));if(o.filled){ctx.closePath();ctx.fill();}ctx.stroke();}
@@ -2044,7 +2282,7 @@ function drawObject(o,highlight=false){
 }
 
 function drawCurrentPreview(o){
-  if(!o)return;ctx.save();ctx.setLineDash([6,4]);ctx.lineWidth=2;ctx.strokeStyle='#6366f1';ctx.fillStyle='rgba(99,102,241,.1)';
+  if(!o)return;ctx.save();ctx.setLineDash([6,4]);ctx.lineWidth=Math.max(1,Number(o.lineWidth)||2);ctx.strokeStyle=o.strokeColor||'#6366f1';ctx.fillStyle=o.fillColor||'rgba(99,102,241,.1)';
   if(o.type==='freehand'){ctx.beginPath();o.points.forEach((pt,i)=>i===0?ctx.moveTo(pt.x,pt.y):ctx.lineTo(pt.x,pt.y));ctx.stroke();}
   else if(o.type==='circle'){ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);if(o.filled)ctx.fill();ctx.stroke();}
   else if(o.type==='rect'){ctx.beginPath();ctx.rect(o.x,o.y,o.w,o.h);if(o.filled)ctx.fill();ctx.stroke();}
@@ -2090,11 +2328,12 @@ canvas.addEventListener('mousedown',evt=>{
 
   // GUEST
   if(!isHost){
-    if(guestDrawMode&&guestDrawEnabled){
+    if(guestDrawEnabled&&guestActiveTab==='draw'){
+      syncGuestDrawControls();
       const tool=guestDrawToolEl.value;
-      if(tool==='freehand'){guestIsDrawing=true;guestCurrentDrawing={id:'gd_'+Date.now()+'_'+GUEST_NAME.replace(/\s/g,''),type:'freehand',points:[pos],draggable:false,filled:guestFillToggle.checked,guestDrawn:true,drawnBy:GUEST_NAME};}
-      else if(tool==='circle'){guestIsDrawing=true;guestCurrentDrawing={id:'gd_'+Date.now()+'_'+GUEST_NAME.replace(/\s/g,''),type:'circle',x:pos.x,y:pos.y,r:0,draggable:false,filled:guestFillToggle.checked,guestDrawn:true,drawnBy:GUEST_NAME};}
-      else if(tool==='rect'){guestIsDrawing=true;guestCurrentDrawing={id:'gd_'+Date.now()+'_'+GUEST_NAME.replace(/\s/g,''),type:'rect',x:pos.x,y:pos.y,w:0,h:0,draggable:false,filled:guestFillToggle.checked,guestDrawn:true,drawnBy:GUEST_NAME};}
+      if(tool==='freehand'){guestIsDrawing=true;guestCurrentDrawing={id:'gd_'+Date.now()+'_'+GUEST_NAME.replace(/\s/g,''),type:'freehand',points:[pos],draggable:false,filled:guestFillToggle.checked,guestDrawn:true,drawnBy:GUEST_NAME,lineWidth:guestBrushSize,strokeColor:guestStrokeColor,fillColor:hexToRgba(guestStrokeColor,0.2)};}
+      else if(tool==='circle'){guestIsDrawing=true;guestCurrentDrawing={id:'gd_'+Date.now()+'_'+GUEST_NAME.replace(/\s/g,''),type:'circle',x:pos.x,y:pos.y,r:0,draggable:false,filled:guestFillToggle.checked,guestDrawn:true,drawnBy:GUEST_NAME,lineWidth:guestBrushSize,strokeColor:guestStrokeColor,fillColor:hexToRgba(guestStrokeColor,0.2)};}
+      else if(tool==='rect'){guestIsDrawing=true;guestCurrentDrawing={id:'gd_'+Date.now()+'_'+GUEST_NAME.replace(/\s/g,''),type:'rect',x:pos.x,y:pos.y,w:0,h:0,draggable:false,filled:guestFillToggle.checked,guestDrawn:true,drawnBy:GUEST_NAME,lineWidth:guestBrushSize,strokeColor:guestStrokeColor,fillColor:hexToRgba(guestStrokeColor,0.2)};}
       return;
     }
     const p=findParticipantAt(pos);
@@ -2103,6 +2342,7 @@ canvas.addEventListener('mousedown',evt=>{
         localSelection=p.id;
         const myTokenIds=participants.filter(pp=>pp.assignedTo===GUEST_NAME).map(pp=>pp.id);
         guestSelectedInfo.textContent=myTokenIds.length>1?`🎮 ${p.publicDisplayName} — click others to switch`:`✅ Selected: ${p.publicDisplayName}`;
+        refreshGuestChargeControls();
         drawAll();
       }
     } else if(!p){
@@ -2119,9 +2359,15 @@ canvas.addEventListener('mousedown',evt=>{
   }
 
   if(drawMode){
+    syncHostDrawControls();
     if(drawTool==='freehand'){isDrawing=true;currentDrawing={id:'obj_'+Date.now(),type:'freehand',points:[pos],draggable:true,filled:fillShapesToggle.checked};}
     else if(drawTool==='circle'){isDrawing=true;currentDrawing={id:'obj_'+Date.now(),type:'circle',x:pos.x,y:pos.y,r:0,draggable:true,filled:fillShapesToggle.checked};}
     else if(drawTool==='rect'){isDrawing=true;currentDrawing={id:'obj_'+Date.now(),type:'rect',x:pos.x,y:pos.y,w:0,h:0,draggable:true,filled:fillShapesToggle.checked};}
+    if(currentDrawing){
+      currentDrawing.lineWidth=drawBrushSize;
+      currentDrawing.strokeColor=drawStrokeColor;
+      currentDrawing.fillColor=hexToRgba(drawStrokeColor,0.2);
+    }
     drawAll();return;
   }
 
@@ -2258,7 +2504,6 @@ canvas.addEventListener('contextmenu',evt=>{
   // No token — canvas-level context actions
   if(!isHost){
     if(guestMeasuring&&guestMeasuring.active){guestMeasuring=null;drawAll();return;}
-    if(guestDrawEnabled){guestDrawMode=!guestDrawMode;drawAll();}
   } else {
     if(measuring&&measuring.active){measuring=null;drawAll();return;}
     // Show canvas empty-space menu for host
@@ -2286,10 +2531,21 @@ function handleWikiEnemyDrop(evt){
   return true;
 }
 
+function handleWikiItemDrop(evt){
+  const tmpl=normalizeDroppedWikiItem(evt.dataTransfer);
+  if(!tmpl)return false;
+  evt.preventDefault();
+  evt.stopPropagation();
+  const pos=screenToCanvas(evt);
+  addBagItemFromTemplate(tmpl,'canvas',{x:pos.x,y:pos.y});
+  return true;
+}
+
 canvas.addEventListener('dragenter',evt=>{
   if(!isHost) return;
   const hasEnemy = looksLikeWikiEnemyDrag(evt);
-  if(hasEnemy){
+  const hasItem = looksLikeWikiItemDrag(evt);
+  if(hasEnemy||hasItem){
     evt.preventDefault();
     canvas.classList.add('drop-target-ready');
   }
@@ -2298,7 +2554,8 @@ canvas.addEventListener('dragenter',evt=>{
 canvas.addEventListener('dragover',evt=>{
   if(!isHost) return;
   const hasEnemy = looksLikeWikiEnemyDrag(evt);
-  if(hasEnemy){
+  const hasItem = looksLikeWikiItemDrag(evt);
+  if(hasEnemy||hasItem){
     evt.preventDefault();
     evt.dataTransfer.dropEffect = 'copy';
     canvas.classList.add('drop-target-ready');
@@ -2314,6 +2571,7 @@ canvas.addEventListener('drop', evt => {
   evt.stopPropagation(); // prevents the document drop handler from firing too
 
   canvas.classList.remove('drop-target-ready');
+  if(handleWikiItemDrop(evt))return;
   handleWikiEnemyDrop(evt);
 });
 
@@ -2322,7 +2580,8 @@ canvas.addEventListener('drop', evt => {
 ['dragenter','dragover'].forEach(type=>{
   document.addEventListener(type,evt=>{
     const hasEnemy = looksLikeWikiEnemyDrag(evt);
-    if(hasEnemy){
+    const hasItem = looksLikeWikiItemDrag(evt);
+    if(hasEnemy||hasItem){
       evt.preventDefault();
       evt.dataTransfer.dropEffect = 'copy';
       canvas.classList.add('drop-target-ready');
@@ -2332,7 +2591,8 @@ canvas.addEventListener('drop', evt => {
 
 document.addEventListener('drop',evt=>{
   const hasEnemy = !!normalizeDroppedWikiEnemy(evt.dataTransfer);
-  if(!hasEnemy) return;
+  const hasItem = !!normalizeDroppedWikiItem(evt.dataTransfer);
+  if(!hasEnemy&&!hasItem) return;
 
   evt.preventDefault();
   canvas.classList.remove('drop-target-ready');
@@ -2346,6 +2606,7 @@ document.addEventListener('drop',evt=>{
 
   if(!insideCanvas) return;
 
+  if(handleWikiItemDrop(evt))return;
   handleWikiEnemyDrop(evt);
 });
 
@@ -3124,11 +3385,14 @@ if(isHost){
     spawnParticipant({name:'Enemy '+num,type:'enemy',initiative:2,speed:10,maxHp:20,maxSanity:5,color:'#e05252',radius:PARTICLE_RADIUS});
   });
 
-  document.getElementById('canvasCtxFromTemplate').addEventListener('click',()=>{
-    closeCanvasCtxMenu();
-    if(!wikiTemplates.length){showAlert('No wiki templates imported yet. Use "Import Wiki Enemies" in the Setup tab.');return;}
-    openWikiTemplateSelector();
-  });
+  const fromTemplateBtn=document.getElementById('canvasCtxFromTemplate');
+  if(fromTemplateBtn){
+    fromTemplateBtn.addEventListener('click',()=>{
+      closeCanvasCtxMenu();
+      if(!wikiTemplates.length){showAlert('No wiki templates available.');return;}
+      openWikiTemplateSelector();
+    });
+  }
 }
 
 /* ================================================================
@@ -3152,11 +3416,15 @@ function updateWikiTemplateCount(){
 }
 
 if(isHost){
-  document.getElementById('importWikiBtn').addEventListener('click',()=>{
-    document.getElementById('wikiImportFile').click();
-  });
+  const importWikiBtn=document.getElementById('importWikiBtn');
+  const wikiImportFile=document.getElementById('wikiImportFile');
 
-  document.getElementById('wikiImportFile').addEventListener('change',(evt)=>{
+  if(importWikiBtn&&wikiImportFile){
+    importWikiBtn.addEventListener('click',()=>{
+      wikiImportFile.click();
+    });
+
+    wikiImportFile.addEventListener('change',(evt)=>{
     const file=evt.target.files[0];
     if(!file)return;
     const reader=new FileReader();
@@ -3173,10 +3441,11 @@ if(isHost){
         saveWikiTemplates();
         showAlert(`Import complete: ${added} new, ${updated} updated.`);
       }catch(err){showAlert('Error reading file: '+err.message);}
-    };
-    reader.readAsText(file);
-    evt.target.value='';
-  });
+      };
+      reader.readAsText(file);
+      evt.target.value='';
+    });
+  }
 
   const wikiDropField=document.getElementById('wikiDropField');
   if(wikiDropField){
@@ -3223,6 +3492,7 @@ if(isHost){
 ================================================================ */
 function openWikiTemplateSelector(){
   const list=document.getElementById('wikiTemplateList');
+  if(!list)return;
   list.innerHTML='';
   wikiTemplates.forEach((tmpl,idx)=>{
     const item=document.createElement('div');
@@ -3246,14 +3516,18 @@ function openWikiTemplateSelector(){
     });
     list.appendChild(item);
   });
-  document.getElementById('wikiTemplateSelector').classList.add('open');
+  const selector=document.getElementById('wikiTemplateSelector');
+  if(selector)selector.classList.add('open');
 }
 
 function closeWikiTemplateSelector(){
-  document.getElementById('wikiTemplateSelector').classList.remove('open');
+  const selector=document.getElementById('wikiTemplateSelector');
+  if(selector)selector.classList.remove('open');
 }
-document.getElementById('wikiTemplateSelectorClose').addEventListener('click',closeWikiTemplateSelector);
-document.getElementById('wikiTemplateSelector').addEventListener('click',e=>{if(e.target===document.getElementById('wikiTemplateSelector'))closeWikiTemplateSelector();});
+const wikiTemplateSelectorClose=document.getElementById('wikiTemplateSelectorClose');
+if(wikiTemplateSelectorClose)wikiTemplateSelectorClose.addEventListener('click',closeWikiTemplateSelector);
+const wikiTemplateSelectorEl=document.getElementById('wikiTemplateSelector');
+if(wikiTemplateSelectorEl)wikiTemplateSelectorEl.addEventListener('click',e=>{if(e.target===wikiTemplateSelectorEl)closeWikiTemplateSelector();});
 
 function parseSizeToRadius(size){
   if(!size)return PARTICLE_RADIUS;
@@ -3419,12 +3693,639 @@ function normalizeDroppedWikiEnemy(dataTransfer){
 }
 
 /* ================================================================
+   INVENTORY BAGS + WIKI ITEMS
+================================================================ */
+function normalizeBagItems(items){
+  const src=Array.isArray(items)?items:[];
+  return src.map(it=>{
+    const loc=it?.location&&typeof it.location==='object'?it.location:{};
+    const kind=loc.kind==='canvas'?'canvas':(loc.kind==='slot'?'slot':'bag');
+    const bagId=(String(loc.bagId||'fin').toLowerCase());
+    const slotId=(String(loc.slotId||'head').toLowerCase());
+    return {
+      id:it?.id||('bag_'+Date.now()+'_'+Math.random().toString(36).slice(2)),
+      name:String(it?.name||'Item'),
+      type:String(it?.type||''),
+      weight:Number.isFinite(Number(it?.weight))?Number(it.weight):0,
+      size:it?.size===undefined?'medium':it.size,
+      description:String(it?.description||it?.text||''),
+      image:String(it?.image||it?.sprite||''),
+      visible:it?.visible!==false,
+      location:{
+        kind:kind==='slot'?'slot':kind,
+        bagId:(bagId==='nad'||bagId==='kat'?bagId:'fin'),
+        slotId:kind==='slot'?(INVENTORY_SLOT_IDS.includes(slotId)?slotId:'head'):null,
+        x:Number.isFinite(Number(loc.x))?Number(loc.x):40,
+        y:Number.isFinite(Number(loc.y))?Number(loc.y):40,
+      },
+    };
+  });
+}
+
+function normalizeBagWeightMultipliers(raw){
+  const src=raw&&typeof raw==='object'?raw:{};
+  const clamp=(v)=>{
+    const n=Number(v);
+    if(!Number.isFinite(n))return 0;
+    return Math.max(0,Math.min(100,n));
+  };
+  return {
+    fin:clamp(src.fin),
+    nad:clamp(src.nad),
+    kat:clamp(src.kat),
+  };
+}
+
+function looksLikeWikiItemDrag(evt){
+  if(!evt||!evt.dataTransfer)return false;
+  const types=Array.from(evt.dataTransfer.types||[]);
+  return types.includes('application/x-ttrpg-item');
+}
+
+function normalizeDroppedWikiItem(dataTransfer){
+  if(!dataTransfer)return null;
+  const tryParse=(raw)=>{
+    if(!raw)return null;
+    try{const p=JSON.parse(String(raw));return p&&typeof p==='object'?p:null;}catch{return null;}
+  };
+  const direct=tryParse(dataTransfer.getData('application/x-ttrpg-item'));
+  if(direct)return direct;
+  const maybeJson=tryParse(dataTransfer.getData('application/json'));
+  if(maybeJson&&(maybeJson.weight!==undefined||maybeJson.description!==undefined||maybeJson.type!==undefined))return maybeJson;
+  return null;
+}
+
+function itemPixelSize(item){
+  const numeric=parseInt(String(item?.size??'40').trim(),10);
+  if(Number.isFinite(numeric)&&numeric>0)return Math.max(14,Math.min(260,numeric));
+  return 40;
+}
+
+function inventoryItemPassesFilter(item){
+  const byName=!inventoryFilters.name||item.name.toLowerCase().includes(inventoryFilters.name);
+  const byType=!inventoryFilters.type||String(item.type||'').toLowerCase().includes(inventoryFilters.type);
+  const minW=inventoryFilters.minWeight===''?null:Number(inventoryFilters.minWeight);
+  const maxW=inventoryFilters.maxWeight===''?null:Number(inventoryFilters.maxWeight);
+  const w=Number(item.weight)||0;
+  const byMin=minW===null||w>=minW;
+  const byMax=maxW===null||w<=maxW;
+  return byName&&byType&&byMin&&byMax;
+}
+
+function addBagItemFromTemplate(tmpl,targetKind,targetPos){
+  const target=targetPos&&typeof targetPos==='object'?targetPos:{};
+  const kind=targetKind==='canvas'?'canvas':(targetKind==='slot'?'slot':'bag');
+  const slotId=String(target.slotId||'head').toLowerCase();
+  const bagIdRaw=String(target.bagId||'fin').toLowerCase();
+  const bagId=(bagIdRaw==='nad'||bagIdRaw==='kat')?bagIdRaw:'fin';
+  const item={
+    id:'bag_'+Date.now()+'_'+Math.random().toString(36).slice(2),
+    name:String(tmpl.name||'Item'),
+    type:String(tmpl.type||''),
+    weight:Number.isFinite(Number(tmpl.weight))?Number(tmpl.weight):0,
+    size:tmpl.size===undefined?'medium':tmpl.size,
+    description:String(tmpl.description||tmpl.text||''),
+    image:String(tmpl.image||tmpl.sprite||''),
+    visible:true,
+    location:{
+      kind,
+      bagId,
+      slotId:kind==='slot'?(INVENTORY_SLOT_IDS.includes(slotId)?slotId:'head'):null,
+      x:Number.isFinite(Number(target.x))?Number(target.x):40,
+      y:Number.isFinite(Number(target.y))?Number(target.y):40,
+    },
+  };
+
+  if(item.location.kind==='slot'&&bagItems.some(it=>it.id!==item.id&&it.location?.kind==='slot'&&it.location?.slotId===item.location.slotId&&it.location?.bagId===item.location.bagId)){
+    showAlert('This slot already has an item.');
+    return;
+  }
+
+  bagItems.push(item);
+  if(isHost)syncToServer();
+  renderInventory();
+  drawAll();
+}
+
+function setBagItemLocation(itemId,location){
+  const idx=bagItems.findIndex(it=>it.id===itemId);
+  if(idx===-1)return;
+  const item=bagItems[idx];
+  const incoming=location&&typeof location==='object'?location:{};
+  const kind=incoming.kind==='canvas'?'canvas':(incoming.kind==='slot'?'slot':'bag');
+  const slotId=String(incoming.slotId||'head').toLowerCase();
+  const bagId=String(incoming.bagId||'fin').toLowerCase();
+  const normalizedBagId=(bagId==='nad'||bagId==='kat')?bagId:'fin';
+  const nextLocation={
+    kind,
+    bagId:normalizedBagId,
+    slotId:kind==='slot'?(INVENTORY_SLOT_IDS.includes(slotId)?slotId:'head'):null,
+    x:Number.isFinite(Number(incoming.x))?Number(incoming.x):40,
+    y:Number.isFinite(Number(incoming.y))?Number(incoming.y):40,
+  };
+
+  if(nextLocation.kind==='slot'){
+    const occupied=bagItems.find(it=>it.id!==itemId&&it.location?.kind==='slot'&&it.location?.slotId===nextLocation.slotId&&it.location?.bagId===nextLocation.bagId);
+    if(occupied){
+      showAlert('This slot already has an item.');
+      renderInventory();
+      drawAll();
+      return;
+    }
+  }
+
+  bagItems[idx]={...item,location:nextLocation};
+  if(isHost){
+    syncToServer();
+  }else{
+    send({type:'guest_bag_item_move',itemId,location:nextLocation});
+  }
+  renderInventory();
+  drawAll();
+}
+
+function removeBagItem(itemId){
+  bagItems=bagItems.filter(it=>it.id!==itemId);
+  if(isHost)syncToServer();
+  renderInventory();
+  drawAll();
+}
+
+function inventoryCanvasToScreen(x,y){
+  const rect=canvas.getBoundingClientRect();
+  return {x:(x/canvas.width)*rect.width,y:(y/canvas.height)*rect.height};
+}
+
+function inventoryScreenToCanvas(clientX,clientY){
+  const rect=canvas.getBoundingClientRect();
+  return {
+    x:((clientX-rect.left)/rect.width)*canvas.width,
+    y:((clientY-rect.top)/rect.height)*canvas.height,
+  };
+}
+
+function inventorySlotWellId(bagId,slotId){
+  return `invSlot-${bagId}-${slotId}`;
+}
+
+function startInvDrag(itemId,evt){
+  evt.preventDefault();
+  evt.stopPropagation();
+  draggingInvItem={itemId};
+  const item=bagItems.find(it=>it.id===itemId);
+  if(!item)return;
+  const body=document.body;
+  const panel=document.getElementById('top-inventory');
+  const panelIcon=document.getElementById('inv-toggle-icon');
+  let autoOpened=false;
+
+  const onMove=(e)=>{
+    const kind=item.location?.kind;
+    const fromBagId=item?.location?.bagId||'fin';
+    const fromSlotId=item?.location?.slotId||'head';
+    const slotEl=document.getElementById(inventorySlotWellId(fromBagId,fromSlotId));
+    const surface=document.getElementById(`invBag${fromBagId.charAt(0).toUpperCase()+fromBagId.slice(1)}`);
+    const layer=document.getElementById('item-layer');
+    if(!draggingInvItem)return;
+    const node=document.querySelector(`.inv-item-sprite[data-item-id="${itemId}"]`);
+    if(!node)return;
+    node.classList.add('dragging');
+    node.style.transform='none';
+
+    const pr=panel.getBoundingClientRect();
+    const hoveringPanel=e.clientX>=pr.left&&e.clientX<=pr.right&&e.clientY>=pr.top&&e.clientY<=pr.bottom;
+    if(hoveringPanel&&!panel.classList.contains('open')){
+      panel.classList.add('open');
+      panelIcon.textContent='▲';
+      autoOpened=true;
+    }else if(autoOpened&&!hoveringPanel){
+      panel.classList.remove('open');
+      panelIcon.textContent='▼';
+      autoOpened=false;
+    }
+
+    if(kind==='bag'&&surface){
+      const r=surface.getBoundingClientRect();
+      node.style.left=(e.clientX-r.left-node.offsetWidth/2)+'px';
+      node.style.top=(e.clientY-r.top-node.offsetHeight/2)+'px';
+    }else if(kind==='slot'&&slotEl){
+      const r=slotEl.getBoundingClientRect();
+      node.style.left=(e.clientX-r.left-node.offsetWidth/2)+'px';
+      node.style.top=(e.clientY-r.top-node.offsetHeight/2)+'px';
+    }else{
+      const r=layer.getBoundingClientRect();
+      node.style.left=(e.clientX-r.left-node.offsetWidth/2)+'px';
+      node.style.top=(e.clientY-r.top-node.offsetHeight/2)+'px';
+    }
+  };
+  const onUp=(e)=>{
+    const originKind=item.location?.kind;
+    const deleteZone=document.getElementById('inv-delete-zone');
+    const canvasRect=canvas.getBoundingClientRect();
+    const delRect=deleteZone.getBoundingClientRect();
+    const panelOpen=panel.classList.contains('open');
+    let targetBag=null;
+    let targetSlot=null;
+
+    if(panelOpen){
+      BAG_IDS.forEach(bagId=>{
+        if(targetBag)return;
+        const el=document.getElementById(`invBag${bagId.charAt(0).toUpperCase()+bagId.slice(1)}`);
+        if(!el)return;
+        const r=el.getBoundingClientRect();
+        if(e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom){
+          targetBag={id:bagId,rect:r};
+        }
+      });
+
+      BAG_IDS.forEach(bagId=>{
+        if(targetSlot)return;
+        INVENTORY_SLOT_DEFS.forEach(slot=>{
+          if(targetSlot)return;
+          const el=document.getElementById(inventorySlotWellId(bagId,slot.id));
+          if(!el)return;
+          const r=el.getBoundingClientRect();
+          if(e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom){
+            targetSlot={id:slot.id,bagId};
+          }
+        });
+      });
+    }
+
+    const inDelete=e.clientX>=delRect.left&&e.clientX<=delRect.right&&e.clientY>=delRect.top&&e.clientY<=delRect.bottom;
+    const inBag=!!targetBag;
+    const inSlot=!!targetSlot;
+    const inCanvas=e.clientX>=canvasRect.left&&e.clientX<=canvasRect.right&&e.clientY>=canvasRect.top&&e.clientY<=canvasRect.bottom;
+
+    if(inDelete&&isHost){
+      removeBagItem(itemId);
+    }else if(inSlot){
+      setBagItemLocation(itemId,{kind:'slot',bagId:targetSlot.bagId,slotId:targetSlot.id,x:0,y:0});
+    }else if(inBag){
+      setBagItemLocation(itemId,{kind:'bag',bagId:targetBag.id,x:e.clientX-targetBag.rect.left,y:e.clientY-targetBag.rect.top});
+    }else if(inCanvas){
+      const c=inventoryScreenToCanvas(e.clientX,e.clientY);
+      setBagItemLocation(itemId,{kind:'canvas',bagId:item.location?.bagId||'fin',x:c.x,y:c.y});
+    }else{
+      renderInventory();
+      drawAll();
+    }
+
+    if(originKind==='bag'&&(!inBag||inCanvas||inDelete||inSlot)){
+      panel.classList.remove('open');
+      panelIcon.textContent='▼';
+      autoOpened=false;
+    }else if(autoOpened){
+      panel.classList.remove('open');
+      panelIcon.textContent='▼';
+      autoOpened=false;
+    }
+
+    draggingInvItem=null;
+    body.removeEventListener('mousemove',onMove);
+    body.removeEventListener('mouseup',onUp);
+  };
+  body.addEventListener('mousemove',onMove);
+  body.addEventListener('mouseup',onUp);
+}
+
+function renderInventory(){
+  BAG_IDS.forEach(bagId=>{
+    const suffix=bagId.charAt(0).toUpperCase()+bagId.slice(1);
+    const surface=document.getElementById(`invBag${suffix}`);
+    const weightEl=document.getElementById(`invWeight${suffix}`);
+    const mulInput=document.getElementById(`invMul${suffix}`);
+    if(!surface||!weightEl)return;
+    if(mulInput){
+      const val=Math.max(0,Math.min(100,Number(bagWeightMultipliers[bagId])||0));
+      if(String(val)!==mulInput.value)mulInput.value=String(val);
+      mulInput.disabled=!isHost;
+    }
+    surface.innerHTML='';
+
+    const bagItemsInBag=bagItems.filter(it=>it.location.kind==='bag'&&it.location.bagId===bagId);
+    const bagVisible=bagItemsInBag.filter(inventoryItemPassesFilter);
+
+    bagVisible.forEach(item=>{
+      const size=itemPixelSize(item);
+      const el=document.createElement('div');
+      el.className='inv-item-sprite';
+      el.dataset.itemId=item.id;
+      el.style.width=size+'px';
+      el.style.height=size+'px';
+      el.style.left=(item.location.x||20)+'px';
+      el.style.top=(item.location.y||20)+'px';
+      if(item.image)el.style.backgroundImage=`url("${item.image}")`;
+      el.title=`${item.name} (${Math.round(Number(item.weight)||0)} Kg)`;
+      el.addEventListener('mousedown',evt=>startInvDrag(item.id,evt));
+      el.addEventListener('contextmenu',evt=>{
+        evt.preventDefault();
+        openInventoryItemViewer(item);
+      });
+      surface.appendChild(el);
+    });
+
+    renderInventorySlots(bagId);
+
+    const bagRaw=bagItemsInBag.reduce((sum,it)=>sum+(Number(it.weight)||0),0);
+    const reduction=Math.max(0,Math.min(100,Number(bagWeightMultipliers[bagId])||0));
+    const bagAdjusted=bagRaw*(1-(reduction/100));
+    const slotsRaw=bagItems.filter(it=>it.location.kind==='slot'&&it.location.bagId===bagId).reduce((sum,it)=>sum+(Number(it.weight)||0),0);
+    const total=bagAdjusted+slotsRaw;
+    weightEl.textContent=`Total: ${Math.round(total)} Kg`;
+  });
+
+  renderCanvasInventoryLayer();
+}
+
+function renderInventorySlots(bagId){
+  const suffix=bagId.charAt(0).toUpperCase()+bagId.slice(1);
+  const wrap=document.getElementById(`invSlots${suffix}`);
+  if(!wrap)return;
+  wrap.innerHTML='';
+
+  INVENTORY_SLOT_DEFS.forEach(slot=>{
+    const slotBox=document.createElement('div');
+    slotBox.className='inv-slot';
+
+    const label=document.createElement('div');
+    label.className='inv-slot-label';
+    label.textContent=slot.label;
+
+    const well=document.createElement('div');
+    well.className='inv-slot-well';
+    well.dataset.bag=bagId;
+    well.dataset.slot=slot.id;
+    well.id=inventorySlotWellId(bagId,slot.id);
+    if(isHost){
+      well.addEventListener('dragover',evt=>{
+        if(looksLikeWikiItemDrag(evt)){evt.preventDefault();evt.dataTransfer.dropEffect='copy';well.classList.add('drag-over');}
+      });
+      well.addEventListener('dragleave',()=>well.classList.remove('drag-over'));
+      well.addEventListener('drop',evt=>{
+        well.classList.remove('drag-over');
+        const tmpl=normalizeDroppedWikiItem(evt.dataTransfer);
+        if(!tmpl)return;
+        evt.preventDefault();
+        addBagItemFromTemplate(tmpl,'slot',{bagId,slotId:slot.id,x:0,y:0});
+        syncToServer();
+      });
+    }
+
+    const item=bagItems.find(it=>it.location.kind==='slot'&&it.location.bagId===bagId&&it.location.slotId===slot.id&&inventoryItemPassesFilter(it));
+    if(item){
+      const el=document.createElement('div');
+      const size=Math.max(20,Math.min(30,itemPixelSize(item)));
+      el.className='inv-item-sprite';
+      el.dataset.itemId=item.id;
+      el.style.width=size+'px';
+      el.style.height=size+'px';
+      el.style.left='50%';
+      el.style.top='50%';
+      el.style.transform='translate(-50%, -50%)';
+      if(item.image)el.style.backgroundImage=`url("${item.image}")`;
+      el.title=`${item.name} (${(Number(item.weight)||0).toFixed(1)} Kg)`;
+      el.addEventListener('mousedown',evt=>startInvDrag(item.id,evt));
+      el.addEventListener('contextmenu',evt=>{
+        evt.preventDefault();
+        openInventoryItemViewer(item);
+      });
+      well.appendChild(el);
+    }
+
+    slotBox.appendChild(label);
+    slotBox.appendChild(well);
+    wrap.appendChild(slotBox);
+  });
+}
+
+function renderCanvasInventoryLayer(){
+  const layer=document.getElementById('item-layer');
+  if(!layer)return;
+  layer.innerHTML='';
+  const list=bagItems.filter(it=>it.location.kind==='canvas'&&inventoryItemPassesFilter(it));
+  list.forEach(item=>{
+    const size=itemPixelSize(item);
+    const pos=inventoryCanvasToScreen(item.location.x||40,item.location.y||40);
+    const el=document.createElement('div');
+    el.className='inv-item-sprite';
+    el.dataset.itemId=item.id;
+    el.style.width=size+'px';
+    el.style.height=size+'px';
+    el.style.left=(pos.x-size/2)+'px';
+    el.style.top=(pos.y-size/2)+'px';
+    if(item.image)el.style.backgroundImage=`url("${item.image}")`;
+    el.title=`${item.name} (${(Number(item.weight)||0).toFixed(1)} Kg)`;
+    el.addEventListener('mousedown',evt=>startInvDrag(item.id,evt));
+    el.addEventListener('contextmenu',evt=>{
+      evt.preventDefault();
+      openInventoryItemViewer(item);
+    });
+    layer.appendChild(el);
+  });
+}
+
+function openInventoryItemViewer(item){
+  const details=[];
+  details.push(`<div><strong>Type:</strong> ${escHtml(String(item.type||'-'))}</div>`);
+  details.push(`<div><strong>Weight:</strong> ${(Number(item.weight)||0).toFixed(1)} Kg</div>`);
+  details.push(`<div><strong>Size:</strong> ${escHtml(String(item.size||'medium'))}</div>`);
+  if(item.description)details.push(`<div style="margin-top:8px;white-space:pre-wrap">${escHtml(item.description)}</div>`);
+  const img=item.image?`<div style="margin-bottom:8px"><div style="width:120px;height:120px;border-radius:10px;background:#111827 center/cover no-repeat;border:1px solid rgba(255,255,255,.15);background-image:url('${escHtml(item.image)}')"></div></div>`:'';
+  openItemViewer({name:item.name,_html:img+details.join('')},'Inventory');
+}
+
+function loadWikiItemTemplates(){
+  try{wikiItemTemplates=JSON.parse(localStorage.getItem('combatWikiItemTemplates')||'[]');}catch{wikiItemTemplates=[];}
+  updateWikiItemsCount();
+  renderWikiItems();
+}
+
+function saveWikiItemTemplates(){
+  localStorage.setItem('combatWikiItemTemplates',JSON.stringify(wikiItemTemplates));
+  updateWikiItemsCount();
+  renderWikiItems();
+}
+
+function updateWikiItemsCount(){
+  const el=document.getElementById('wikiItemsCount');
+  if(el)el.textContent=wikiItemTemplates.length?`${wikiItemTemplates.length} item template(s)`:'No item templates loaded';
+}
+
+function renderWikiItems(){
+  const list=document.getElementById('wikiItemList');
+  if(!list)return;
+  list.innerHTML='';
+  wikiItemTemplates.forEach(tmpl=>{
+    const card=document.createElement('div');
+    card.className='wiki-item-card';
+    card.draggable=true;
+    card.innerHTML=`
+      <div class="wiki-item-thumb" style="${tmpl.image?`background-image:url('${escHtml(tmpl.image)}')`:''}"></div>
+      <div class="wiki-item-meta">
+        <div class="wiki-item-name">${escHtml(String(tmpl.name||'Item'))}</div>
+        <div class="wiki-item-info">${escHtml(String(tmpl.type||'type'))} · ${(Number(tmpl.weight)||0).toFixed(1)} Kg</div>
+      </div>
+    `;
+    card.addEventListener('dragstart',evt=>{
+      evt.dataTransfer.setData('application/x-ttrpg-item',JSON.stringify(tmpl));
+      evt.dataTransfer.effectAllowed='copy';
+    });
+    card.addEventListener('contextmenu',evt=>{
+      evt.preventDefault();
+      openInventoryItemViewer(normalizeBagItems([{...tmpl,location:{kind:'bag',bagId:'fin',x:20,y:20}}])[0]);
+    });
+    list.appendChild(card);
+  });
+}
+
+function initInventoryUI(){
+  loadWikiItemTemplates();
+  bagItems=normalizeBagItems(bagItems);
+
+  const panel=document.getElementById('top-inventory');
+  const handle=document.getElementById('inv-handle');
+  const icon=document.getElementById('inv-toggle-icon');
+  handle.addEventListener('click',()=>{
+    panel.classList.toggle('open');
+    icon.textContent=panel.classList.contains('open')?'▲':'▼';
+  });
+
+  const del=document.getElementById('inv-delete-zone');
+  if(isHost)del.classList.add('host-visible');
+
+  const filterName=document.getElementById('invFilterName');
+  const filterType=document.getElementById('invFilterType');
+  const minW=document.getElementById('invFilterMinWeight');
+  const maxW=document.getElementById('invFilterMaxWeight');
+  [filterName,filterType,minW,maxW].forEach(el=>{
+    el.addEventListener('input',()=>{
+      inventoryFilters={
+        name:filterName.value.trim().toLowerCase(),
+        type:filterType.value.trim().toLowerCase(),
+        minWeight:minW.value,
+        maxWeight:maxW.value,
+      };
+      renderInventory();
+    });
+  });
+
+  BAG_IDS.forEach(bagId=>{
+    const suffix=bagId.charAt(0).toUpperCase()+bagId.slice(1);
+    const bagSurface=document.getElementById(`invBag${suffix}`);
+    if(!bagSurface)return;
+
+    bagSurface.addEventListener('dragover',evt=>{
+      if(!isHost)return;
+      if(looksLikeWikiItemDrag(evt)){evt.preventDefault();evt.dataTransfer.dropEffect='copy';bagSurface.classList.add('drag-over');}
+    });
+    bagSurface.addEventListener('dragleave',()=>bagSurface.classList.remove('drag-over'));
+    bagSurface.addEventListener('drop',evt=>{
+      bagSurface.classList.remove('drag-over');
+      if(!isHost)return;
+      const tmpl=normalizeDroppedWikiItem(evt.dataTransfer);
+      if(!tmpl)return;
+      evt.preventDefault();
+      const r=bagSurface.getBoundingClientRect();
+      addBagItemFromTemplate(tmpl,'bag',{bagId,x:evt.clientX-r.left,y:evt.clientY-r.top});
+      syncToServer();
+    });
+  });
+
+  BAG_IDS.forEach(bagId=>{
+    const suffix=bagId.charAt(0).toUpperCase()+bagId.slice(1);
+    const input=document.getElementById(`invMul${suffix}`);
+    if(!input)return;
+    input.value=String(Number(bagWeightMultipliers[bagId])||0);
+    input.addEventListener('input',()=>{
+      bagWeightMultipliers[bagId]=Math.max(0,Math.min(100,Number(input.value)||0));
+      renderInventory();
+      if(isHost)syncToServer();
+    });
+  });
+
+  const deleteZone=document.getElementById('inv-delete-zone');
+  deleteZone.addEventListener('dragover',evt=>{
+    if(!isHost)return;
+    evt.preventDefault();
+    deleteZone.classList.add('drag-over');
+  });
+  deleteZone.addEventListener('dragleave',()=>deleteZone.classList.remove('drag-over'));
+  deleteZone.addEventListener('drop',evt=>{evt.preventDefault();deleteZone.classList.remove('drag-over');});
+
+  const addBtn=document.getElementById('addWikiItemBtn');
+  const importBtn=document.getElementById('importWikiItemsBtn');
+  const exportBtn=document.getElementById('exportWikiItemsBtn');
+  const importInput=document.getElementById('wikiItemsImportFile');
+  const modal=document.getElementById('itemCreatorModal');
+
+  if(!isHost){
+    [addBtn,importBtn,exportBtn].forEach(btn=>{if(btn)btn.style.display='none';});
+  }
+
+  addBtn?.addEventListener('click',()=>modal.classList.add('open'));
+  document.getElementById('itemCreatorCancel')?.addEventListener('click',()=>modal.classList.remove('open'));
+  document.getElementById('itemCreatorSave')?.addEventListener('click',()=>{
+    const tmpl={
+      name:document.getElementById('newItemName').value.trim()||'Item',
+      type:document.getElementById('newItemType').value.trim(),
+      weight:Number(document.getElementById('newItemWeight').value)||0,
+      size:document.getElementById('newItemSize').value.trim()||'medium',
+      image:document.getElementById('newItemImage').value.trim(),
+      description:document.getElementById('newItemDescription').value.trim(),
+    };
+    wikiItemTemplates.push(tmpl);
+    saveWikiItemTemplates();
+    modal.classList.remove('open');
+  });
+
+  importBtn?.addEventListener('click',()=>importInput.click());
+  importInput?.addEventListener('change',evt=>{
+    const file=evt.target.files?.[0];
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(e)=>{
+      try{
+        const parsed=JSON.parse(String(e.target.result||'[]'));
+        if(!Array.isArray(parsed)){showAlert('Invalid item file format.');return;}
+        wikiItemTemplates=parsed.map(it=>({
+          name:String(it?.name||'Item'),
+          type:String(it?.type||''),
+          weight:Number(it?.weight)||0,
+          size:it?.size===undefined?'medium':it.size,
+          image:String(it?.image||it?.sprite||''),
+          description:String(it?.description||it?.text||''),
+        }));
+        saveWikiItemTemplates();
+      }catch{showAlert('Could not import item templates.');}
+    };
+    reader.readAsText(file);
+    evt.target.value='';
+  });
+
+  exportBtn?.addEventListener('click',()=>{
+    const blob=new Blob([JSON.stringify(wikiItemTemplates,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='wiki-items.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),0);
+  });
+
+  renderInventory();
+}
+
+/* ================================================================
    ITEMS — VIEWER MODAL
 ================================================================ */
 function openItemViewer(item,ownerName){
   document.getElementById('itemViewerTitle').textContent=item.name;
   document.getElementById('itemViewerOwner').textContent=`Carried by: ${ownerName}`;
-  document.getElementById('itemViewerBody').textContent=item.text||'(No description)';
+  const body=document.getElementById('itemViewerBody');
+  if(item&&item._html!==undefined)body.innerHTML=item._html;
+  else body.textContent=item.text||'(No description)';
   document.getElementById('itemViewerModal').classList.add('open');
 }
 function closeItemViewer(){

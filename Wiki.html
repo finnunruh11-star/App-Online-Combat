@@ -1,0 +1,1675 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>D&D Enemy Compendium</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/umd/lucide.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+            color: #f1f5f9;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        h1 {
+            color: #fbbf24;
+            font-size: 2.2rem;
+        }
+
+        .subtitle {
+            color: #94a3b8;
+        }
+
+        .wiki-switch {
+            display: flex;
+            gap: 0.6rem;
+            margin-bottom: 1.2rem;
+            flex-wrap: wrap;
+        }
+
+        .wiki-switch .btn.active {
+            box-shadow: 0 0 0 2px rgba(251,191,36,.45) inset;
+        }
+
+        .search-bar {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .search-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 0.75rem 1rem 0.75rem 2.5rem;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 0.5rem;
+            color: #f1f5f9;
+            font-size: 1rem;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #fbbf24;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: background 0.2s;
+        }
+
+        .btn-primary {
+            background: #d97706;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #b45309;
+        }
+
+        .btn-secondary {
+            background: #334155;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #475569;
+        }
+
+        .btn-success {
+            background: #059669;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #047857;
+        }
+
+        .btn-danger {
+            background: #7f1d1d;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #991b1b;
+        }
+
+        .btn-icon {
+            padding: 0.5rem;
+            background: #334155;
+            border: none;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            color: white;
+            transition: background 0.2s;
+        }
+
+        .btn-icon:hover {
+            background: #475569;
+        }
+
+        .btn-icon.danger {
+            background: #7f1d1d;
+        }
+
+        .btn-icon.danger:hover {
+            background: #991b1b;
+        }
+
+        .filters {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        select {
+            padding: 0.5rem 1rem;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 0.5rem;
+            color: #f1f5f9;
+            cursor: pointer;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #fbbf24;
+        }
+
+        .enemy-list {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .enemy-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+        }
+
+        .enemy-card.draggable-card {
+            cursor: grab;
+        }
+
+        .enemy-card.draggable-card:active {
+            cursor: grabbing;
+        }
+
+        .enemy-header-main {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .enemy-image-preview {
+            width: 78px;
+            height: 78px;
+            flex: 0 0 78px;
+            border-radius: 0.75rem;
+            border: 2px solid rgba(251, 191, 36, 0.75);
+            background: #0f172a center/cover no-repeat;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+            overflow: hidden;
+        }
+
+        .enemy-image-preview.empty {
+            display: grid;
+            place-items: center;
+            color: #94a3b8;
+            font-size: 0.75rem;
+            text-align: center;
+            padding: 0.35rem;
+        }
+
+        .enemy-image-preview.large {
+            width: 112px;
+            height: 112px;
+            flex-basis: 112px;
+        }
+
+        .enemy-text-block {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .enemy-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+
+        .enemy-title {
+            color: #fbbf24;
+            font-size: 1.75rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .enemy-type {
+            color: #94a3b8;
+        }
+
+        .enemy-sprite-picker {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+            padding: 0.9rem;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+        }
+
+        .enemy-sprite-actions {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            min-width: 0;
+        }
+
+        .enemy-sprite-actions .row {
+            align-items: center;
+        }
+
+        .enemy-sprite-actions button {
+            width: auto;
+        }
+
+        .enemy-sprite-file {
+            display: none;
+        }
+
+        .enemy-sprite-clear {
+            background: #334155;
+            color: white;
+        }
+
+        .location-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .location-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.75rem;
+            background: #065f46;
+            color: #10b981;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+        }
+
+        .enemy-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .stat-box {
+            background: #0f172a;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+        }
+
+        .stat-label {
+            color: #94a3b8;
+            font-size: 0.875rem;
+        }
+
+        .stat-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-top: 0.25rem;
+        }
+
+        .drops-box {
+            background: #0f172a;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .drops-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #fbbf24;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .info-section {
+            margin-bottom: 1rem;
+        }
+
+        .info-title {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .info-title.attacks { color: #fbbf24; }
+        .info-title.weaknesses { color: #ef4444; }
+        .info-title.resistances { color: #3b82f6; }
+        .info-title.immunities { color: #10b981; }
+        .info-title.abilities { color: #a855f7; }
+        .info-title.tactics { color: #f97316; }
+        .info-title.notes { color: #94a3b8; }
+
+        .info-text {
+            color: #cbd5e1;
+            white-space: pre-line;
+        }
+
+        .form-container {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+        }
+
+        .form-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        label {
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        textarea {
+            padding: 0.5rem 0.75rem;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 0.375rem;
+            color: #f1f5f9;
+            font-family: inherit;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #fbbf24;
+        }
+
+        textarea {
+            resize: vertical;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #94a3b8;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .section-divider {
+            margin: 2rem 0 1rem;
+            border-top: 1px solid #334155;
+            padding-top: 1rem;
+        }
+
+        .item-list {
+            display: grid;
+            gap: 0.75rem;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        }
+
+        .item-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+            padding: 0.8rem;
+            cursor: grab;
+        }
+
+        .item-card:active {
+            cursor: grabbing;
+        }
+
+        .item-header {
+            display: flex;
+            gap: 0.65rem;
+            align-items: flex-start;
+        }
+
+        .item-thumb {
+            width: 48px;
+            height: 48px;
+            border-radius: 0.5rem;
+            border: 1px solid rgba(255,255,255,.15);
+            background: #0f172a center/cover no-repeat;
+            flex: 0 0 48px;
+        }
+
+        .item-thumb.empty {
+            display: grid;
+            place-items: center;
+            color: #94a3b8;
+            font-size: 0.65rem;
+            text-align: center;
+            padding: 0.2rem;
+        }
+
+        .item-title {
+            color: #c7d2fe;
+            font-weight: 700;
+            margin-bottom: 0.15rem;
+        }
+
+        .item-meta {
+            color: #94a3b8;
+            font-size: 0.85rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .item-desc {
+            color: #cbd5e1;
+            font-size: 0.85rem;
+            white-space: pre-line;
+            margin-top: 0.4rem;
+        }
+
+        .item-image-picker {
+            display: flex;
+            gap: 0.8rem;
+            align-items: flex-start;
+            padding: 0.8rem;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+            background: #0f172a;
+        }
+
+        .item-image-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.45rem;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .tag-input-container {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .tag-input-container input, .tag-input-container select {
+            flex: 1;
+        }
+
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .tag-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            background: #065f46;
+            color: #10b981;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+        }
+
+        .tag-remove {
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0 0.25rem;
+        }
+
+        .tag-remove:hover {
+            color: #ef4444;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        /* Compact Mode (list view only) */
+        .compact-mode #listView .enemy-card {
+            padding: 0.6rem;
+            font-size: 0.85rem;
+        }
+        .compact-mode #listView .enemy-title {
+            font-size: 1.05rem;
+        }
+        .compact-mode #listView .stats-grid {
+            grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+            gap: 0.4rem;
+            margin-bottom: 0.5rem;
+        }
+        .compact-mode #listView .info-section,
+        .compact-mode #listView .drops-box {
+            display: none;
+        }
+        .compact-mode #listView .enemy-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 0.5rem;
+        }
+        .compact-mode #listView .enemy-type,
+        .compact-mode #listView .location-tag {
+            font-size: 0.75rem;
+        }
+        .clickable {
+            cursor: pointer;
+        }
+        .clickable:hover {
+            text-decoration: underline;
+        }
+
+        /* Ensure DETAIL VIEW shows full info */
+        #detailView .info-section,
+        #detailView .drops-box,
+        #detailView .enemy-card {
+            display: block !important;
+        }
+        #detailView .enemy-title {
+            font-size: 1.4rem !important;
+        }
+        #detailView .stats-grid {
+            margin-bottom: 1rem !important;
+        }
+
+        /* Responsive tweak */
+        @media (max-width: 640px) {
+            .compact-mode #listView .enemy-list {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>Enemy Compendium</h1>
+                <p class="subtitle">Document and track enemies for your campaign</p>
+            </div>
+        </header>
+
+        <div class="wiki-switch">
+            <button id="switchEnemiesBtn" class="btn btn-primary active" onclick="switchWikiSection('enemies')">⚔️ Enemies</button>
+            <button id="switchItemsBtn" class="btn btn-secondary" onclick="switchWikiSection('items')">🎒 Items</button>
+        </div>
+
+        <div id="enemiesSection">
+
+        <!-- ENEMIES: LIST / GRID VIEW -->
+        <div id="listView">
+            <div class="search-bar">
+                <input type="text" id="searchInput" class="search-input" placeholder="Search enemies...">
+                <button class="btn btn-primary" onclick="showAddForm()">➕ Add Enemy</button>
+                <button class="btn btn-success" onclick="exportData()">📤 Export Enemies</button>
+                <button class="btn btn-secondary" onclick="document.getElementById('importFile').click()">📥 Import Enemies</button>
+                <input type="file" id="importFile" accept=".json" onchange="importData(event)">
+                <button class="btn btn-secondary" id="compactToggleBtn" onclick="toggleCompactMode()">🗜️ Compact View</button>
+            </div>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <span>📍</span>
+                    <select id="locationFilter" onchange="filterEnemies()">
+                        <option value="">All Locations</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <span>🎭</span>
+                    <select id="typeFilter" onchange="filterEnemies()">
+                        <option value="">All Types</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <span>📦</span>
+                    <select id="dropFilter" onchange="filterEnemies()">
+                        <option value="">All Droppings</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <span>🔄</span>
+                    <select id="sortFilter" onchange="filterEnemies()">
+                        <option value="">Default Order</option>
+                        <option value="name-asc">Name (A-Z)</option>
+                        <option value="name-desc">Name (Z-A)</option>
+                        <option value="size-asc">Size (Small to Large)</option>
+                        <option value="size-desc">Size (Large to Small)</option>
+                    </select>
+                </div>
+                <button class="btn btn-secondary" id="clearFiltersBtn" onclick="clearFilters()" style="display: none;">
+                    Clear Filters
+                </button>
+            </div>
+
+            <div id="enemyList" class="enemy-list"></div>
+        </div>
+
+        <!-- ENEMIES: FORM VIEW -->
+        <div id="formView" class="hidden">
+            <div class="form-container">
+                <div class="form-header">
+                    <h2 id="formTitle" style="color: #fbbf24;">Add New Enemy</h2>
+                    <button class="btn-icon" onclick="cancelForm()">✕</button>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Name *</label>
+                        <input type="text" id="nameInput">
+                    </div>
+                    <div class="form-group">
+                        <label>Type</label>
+                        <input type="text" id="typeInput" placeholder="e.g., Undead, Beast">
+                    </div>
+                    <div class="form-group">
+                        <label>Size</label>
+                        <input type="text" id="sizeInput" placeholder="e.g., Medium, Large">
+                    </div>
+                    <div class="form-group">
+                        <label>HP</label>
+                        <input type="text" id="hpInput" placeholder="e.g., 45 or ~40-50">
+                    </div>
+                    <div class="form-group">
+                        <label style="color: #a78bfa;">Sanity</label>
+                        <input type="text" id="sanityInput" placeholder="e.g., 30">
+                    </div>
+                    <div class="form-group">
+                        <label>AC</label>
+                        <input type="text" id="acInput" placeholder="e.g., 15">
+                    </div>
+                    <div class="form-group">
+                        <label>Speed</label>
+                        <input type="text" id="speedInput" placeholder="e.g., 30 ft.">
+                    </div>
+                    <div class="form-group">
+                        <label>Color</label>
+                        <input type="color" id="colorInput" value="#e05252">
+                    </div>
+                    <div class="form-group">
+                        <label style="color: #fbbf24;">Sprite / Image</label>
+                        <div class="enemy-sprite-picker">
+                            <div id="enemyImagePreview" class="enemy-image-preview empty">No image</div>
+                            <div class="enemy-sprite-actions">
+                                <div class="small">Upload an image to show on the wiki and in combat tokens.</div>
+                                <div class="row" style="gap:0.5rem">
+                                    <button id="enemyImageBtn" class="btn btn-secondary" type="button">Upload Image</button>
+                                    <button id="clearEnemyImage" class="btn btn-secondary enemy-sprite-clear" type="button">Clear</button>
+                                </div>
+                                <input type="file" id="enemyImageFile" class="enemy-sprite-file" accept="image/*">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label style="color: #fbbf24;">Drops</label>
+                        <textarea id="dropsInput" rows="3" placeholder="e.g., Gold&#10;Leather&#10;Bone Fragment"></textarea>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label style="color: #10b981;">Locations (Tags)</label>
+                    <div class="tag-input-container">
+                        <input type="text" id="locationTagInput" placeholder="Add location...">
+                        <button class="btn btn-secondary" onclick="addLocationTag()">Add</button>
+                    </div>
+                    <div id="locationTagList" class="tag-list"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>Attacks</label>
+                    <textarea id="attacksInput" rows="3" placeholder="List attacks with range and damage"></textarea>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label style="color: #ef4444;">Weaknesses</label>
+                        <input type="text" id="weaknessesInput" placeholder="e.g., Fire, Radiant">
+                    </div>
+                    <div class="form-group">
+                        <label style="color: #3b82f6;">Resistances</label>
+                        <input type="text" id="resistancesInput" placeholder="e.g., Cold, Poison">
+                    </div>
+                    <div class="form-group">
+                        <label style="color: #10b981;">Immunities</label>
+                        <input type="text" id="immunitiesInput" placeholder="e.g., Poison, Charm">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Special Abilities</label>
+                    <textarea id="abilitiesInput" rows="3" placeholder="List special actions, reactions, etc."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Tactics</label>
+                    <textarea id="tacticsInput" rows="3" placeholder="How they fight, behavioral patterns..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea id="notesInput" rows="3" placeholder="Lore, observations, etc."></textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn btn-primary" onclick="saveEnemy()">
+                        💾 <span id="saveButtonText">Save</span> Enemy
+                    </button>
+                    <button class="btn btn-secondary" onclick="cancelForm()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ENEMIES: DETAIL VIEW -->
+        <div id="detailView" class="hidden">
+            <div class="detail-container">
+                <div id="detailHeader">
+                    <h2 id="detailName">Enemy Name</h2>
+                    <div class="detail-actions">
+                        <button class="btn btn-secondary" onclick="backToList()">⬅ Back</button>
+                        <button class="btn btn-primary" id="detailEditBtn" onclick="">✏️ Edit</button>
+                        <button class="btn btn-danger" id="detailDeleteBtn" onclick="">🗑️ Delete</button>
+                    </div>
+                </div>
+
+                <div id="detailContent"></div>
+            </div>
+        </div>
+
+        </div>
+
+        <div id="itemsSection" class="hidden section-divider">
+            <h2 style="color:#a5b4fc;margin-bottom:0.5rem">Item Compendium</h2>
+            <p class="subtitle" style="margin-bottom:1rem">Create draggable item templates for combat bags and canvas drops.</p>
+
+            <div id="itemListView">
+                <div class="search-bar">
+                    <input type="text" id="itemSearchInput" class="search-input" placeholder="Search items...">
+                    <button class="btn btn-primary" onclick="showAddItemForm()">➕ Add Item</button>
+                    <button class="btn btn-success" onclick="exportItems()">📤 Export Items</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('itemImportFile').click()">📥 Import Items</button>
+                    <input type="file" id="itemImportFile" accept=".json" onchange="importItems(event)">
+                </div>
+                <div id="itemList" class="item-list"></div>
+            </div>
+
+            <div id="itemFormView" class="hidden">
+                <div class="form-container">
+                    <div class="form-header">
+                        <h2 id="itemFormTitle" style="color:#a5b4fc;">Add New Item</h2>
+                        <button class="btn-icon" onclick="cancelItemForm()">✕</button>
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Name *</label>
+                            <input type="text" id="itemNameInput">
+                        </div>
+                        <div class="form-group">
+                            <label>Type</label>
+                            <input type="text" id="itemTypeInput" placeholder="e.g., Weapon, Consumable">
+                        </div>
+                        <div class="form-group">
+                            <label>Weight</label>
+                            <input type="number" id="itemWeightInput" step="0.1" placeholder="e.g., 2.5">
+                        </div>
+                        <div class="form-group">
+                            <label>Size</label>
+                            <input type="number" id="itemSizeInput" placeholder="40">
+                        </div>
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label>Image</label>
+                            <div class="item-image-picker">
+                                <div id="itemImagePreview" class="item-thumb empty" style="width:72px;height:72px;flex-basis:72px;">No image</div>
+                                <div class="item-image-actions">
+                                    <div class="subtitle" style="font-size:0.85rem;">Choose directly from your device.</div>
+                                    <div class="row" style="gap:0.5rem">
+                                        <button id="itemImageBtn" class="btn btn-secondary" type="button">Upload Image</button>
+                                        <button id="clearItemImage" class="btn btn-secondary" type="button">Clear</button>
+                                    </div>
+                                    <input type="file" id="itemImageFile" accept="image/*">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="itemDescriptionInput" rows="4"></textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button class="btn btn-primary" onclick="saveItem()">💾 <span id="itemSaveButtonText">Save</span> Item</button>
+                        <button class="btn btn-secondary" onclick="cancelItemForm()">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // -------------------- Enemies --------------------
+        let enemies = [];
+        let editingIndex = null;
+        let currentLocationTags = [];
+        let currentEnemyImage = '';
+        let items = [];
+        let editingItemIndex = null;
+        let currentItemImage = '';
+
+        // -------------------- Load/Save --------------------
+        function loadEnemies() {
+            const stored = localStorage.getItem('dndEnemies');
+            if (stored) {
+                enemies = JSON.parse(stored);
+                enemies = enemies.map(e => {
+                    if (e.location && typeof e.location === 'string') {
+                        return { ...e, locations: [e.location], location: undefined };
+                    }
+                    if (!e.locations) {
+                        return { ...e, locations: [] };
+                    }
+                    return e;
+                });
+            }
+            renderEnemies();
+            updateFilters();
+        }
+
+        function saveEnemiesToStorage() {
+            localStorage.setItem('dndEnemies', JSON.stringify(enemies));
+        }
+
+        function loadItems() {
+            const stored = localStorage.getItem('dndItems');
+            if (stored) {
+                try {
+                    items = JSON.parse(stored);
+                } catch {
+                    items = [];
+                }
+            }
+            renderItems();
+        }
+
+        function saveItemsToStorage() {
+            localStorage.setItem('dndItems', JSON.stringify(items));
+        }
+
+        // -------------------- Helpers --------------------
+        function escapeHtml(unsafe) {
+            if (unsafe === undefined || unsafe === null) return '';
+            return String(unsafe)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function getEnemyImage(enemy) {
+            return (enemy && (enemy.image || enemy.sprite || enemy.avatar)) ? (enemy.image || enemy.sprite || enemy.avatar) : '';
+        }
+
+        function renderEnemyImagePreview(el, src, label = 'No image') {
+            if (!el) return;
+            if (src) {
+                el.style.backgroundImage = `url("${src}")`;
+                el.textContent = '';
+                el.classList.remove('empty');
+            } else {
+                el.style.backgroundImage = 'none';
+                el.textContent = label;
+                el.classList.add('empty');
+            }
+        }
+
+        function readEnemyImageFile(file) {
+            return new Promise((resolve, reject) => {
+                if (!file) {
+                    resolve('');
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(reader.error || new Error('Could not read file'));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function switchWikiSection(section) {
+            const enemies = document.getElementById('enemiesSection');
+            const itemsSection = document.getElementById('itemsSection');
+            const bEnemies = document.getElementById('switchEnemiesBtn');
+            const bItems = document.getElementById('switchItemsBtn');
+            if (section === 'items') {
+                enemies.classList.add('hidden');
+                itemsSection.classList.remove('hidden');
+                bEnemies.classList.remove('active');
+                bEnemies.classList.remove('btn-primary');
+                bEnemies.classList.add('btn-secondary');
+                bItems.classList.add('active');
+                bItems.classList.remove('btn-secondary');
+                bItems.classList.add('btn-primary');
+            } else {
+                itemsSection.classList.add('hidden');
+                enemies.classList.remove('hidden');
+                bItems.classList.remove('active');
+                bItems.classList.remove('btn-primary');
+                bItems.classList.add('btn-secondary');
+                bEnemies.classList.add('active');
+                bEnemies.classList.remove('btn-secondary');
+                bEnemies.classList.add('btn-primary');
+            }
+        }
+
+        function hideAllViews() {
+            document.getElementById('listView').classList.add('hidden');
+            document.getElementById('formView').classList.add('hidden');
+            document.getElementById('detailView').classList.add('hidden');
+        }
+
+        // -------------------- Enemies UI --------------------
+        function renderEnemies() {
+            const filtered = getFilteredEnemies();
+            const list = document.getElementById('enemyList');
+
+            if (filtered.length === 0) {
+                list.innerHTML = '<div class="empty-state">' +
+                    (enemies.length === 0 ?
+                        'No enemies recorded yet. Start documenting your encounters!' :
+                        'No enemies found matching your filters.') +
+                    '</div>';
+                return;
+            }
+
+            list.innerHTML = filtered.map(enemy => {
+                const actualIndex = enemies.indexOf(enemy);
+                const imageSrc = getEnemyImage(enemy);
+                return `
+                    <div class="enemy-card draggable-card" draggable="true" ondragstart="dragEnemy(event, ${actualIndex})">
+                        <div class="enemy-header">
+                            <div class="enemy-header-main">
+                                ${imageSrc ? `<div class="enemy-image-preview" style="background-image:url(&quot;${escapeHtml(imageSrc)}&quot;)" aria-label="Enemy image"></div>` : `<div class="enemy-image-preview empty">No image</div>`}
+                                <div class="enemy-text-block">
+                                    <h3 class="enemy-title clickable" onclick="showEnemyDetail(${actualIndex})">${escapeHtml(enemy.name)}</h3>
+                                    <p class="enemy-type">${enemy.size ? escapeHtml(enemy.size) + ' ' : ''}${escapeHtml(enemy.type || '')}</p>
+                                    ${enemy.locations && enemy.locations.length > 0 ? `
+                                        <div class="location-tags">
+                                            ${enemy.locations.map(loc => `<span class="location-tag">📍 ${escapeHtml(loc)}</span>`).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            <div class="enemy-actions">
+                                <button class="btn-icon" onclick="editEnemy(${actualIndex})">✏️</button>
+                                <button class="btn-icon danger" onclick="deleteEnemy(${actualIndex})">🗑️</button>
+                            </div>
+                        </div>
+
+                        <div class="stats-grid">
+                            ${enemy.hp ? `<div class="stat-box"><div class="stat-label">HP</div><div class="stat-value">${escapeHtml(enemy.hp)}</div></div>` : ''}
+                            ${enemy.sanity ? `<div class="stat-box" style="border-color:#a78bfa33"><div class="stat-label" style="color:#a78bfa">Sanity</div><div class="stat-value">${escapeHtml(enemy.sanity)}</div></div>` : ''}
+                            ${enemy.ac ? `<div class="stat-box"><div class="stat-label">AC</div><div class="stat-value">${escapeHtml(enemy.ac)}</div></div>` : ''}
+                            ${enemy.speed ? `<div class="stat-box"><div class="stat-label">Speed</div><div class="stat-value">${escapeHtml(enemy.speed)}</div></div>` : ''}
+                            ${enemy.color && enemy.color !== '#e05252' ? `<div class="stat-box"><div class="stat-label">Color</div><div class="stat-value"><span style="display:inline-block;width:16px;height:16px;border-radius:4px;background:${escapeHtml(enemy.color)};vertical-align:middle"></span></div></div>` : ''}
+                        </div>
+
+                        ${enemy.drops ? `
+                            <div class="drops-box">
+                                <div class="drops-header">📦 Drops</div>
+                                <div class="info-text">${escapeHtml(enemy.drops)}</div>
+                            </div>
+                        ` : ''}
+
+                        ${enemy.attacks ? `<div class="info-section"><div class="info-title attacks">Attacks</div><div class="info-text">${escapeHtml(enemy.attacks)}</div></div>` : ''}
+                        ${enemy.weaknesses ? `<div class="info-section"><div class="info-title weaknesses">Weaknesses</div><div class="info-text">${escapeHtml(enemy.weaknesses)}</div></div>` : ''}
+                        ${enemy.resistances ? `<div class="info-section"><div class="info-title resistances">Resistances</div><div class="info-text">${escapeHtml(enemy.resistances)}</div></div>` : ''}
+                        ${enemy.immunities ? `<div class="info-section"><div class="info-title immunities">Immunities</div><div class="info-text">${escapeHtml(enemy.immunities)}</div></div>` : ''}
+                        ${enemy.abilities ? `<div class="info-section"><div class="info-title abilities">Special Abilities</div><div class="info-text">${escapeHtml(enemy.abilities)}</div></div>` : ''}
+                        ${enemy.tactics ? `<div class="info-section"><div class="info-title tactics">Tactics</div><div class="info-text">${escapeHtml(enemy.tactics)}</div></div>` : ''}
+                        ${enemy.notes ? `<div class="info-section"><div class="info-title notes">Notes</div><div class="info-text">${escapeHtml(enemy.notes)}</div></div>` : ''}
+                    </div>
+                `;
+            }).join('');
+
+        }
+
+        function getFilteredEnemies() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const location = document.getElementById('locationFilter').value;
+            const type = document.getElementById('typeFilter').value;
+            const drop = document.getElementById('dropFilter').value;
+            const sort = document.getElementById('sortFilter').value;
+
+            let filtered = enemies.filter(enemy => {
+                const matchesSearch = !search ||
+                    (enemy.name && enemy.name.toLowerCase().includes(search)) ||
+                    (enemy.type && enemy.type.toLowerCase().includes(search));
+                const matchesLocation = !location || (enemy.locations && enemy.locations.includes(location));
+                const matchesType = !type || (enemy.type && enemy.type === type);
+                const matchesDrop = !drop || (enemy.drops && enemy.drops.toLowerCase().includes(drop.toLowerCase()));
+                return matchesSearch && matchesLocation && matchesType && matchesDrop;
+            });
+
+            if (sort) {
+                const sizeOrder = {
+                    'tiny': 1, 'small': 2, 'medium': 3,
+                    'large': 4, 'huge': 5, 'gargantuan': 6
+                };
+                filtered = [...filtered].sort((a, b) => {
+                    if (sort === 'name-asc') return (a.name || '').localeCompare(b.name || '');
+                    if (sort === 'name-desc') return (b.name || '').localeCompare(a.name || '');
+                    if (sort === 'size-asc') {
+                        return (sizeOrder[(a.size || '').toLowerCase()] || 999) - (sizeOrder[(b.size || '').toLowerCase()] || 999);
+                    }
+                    if (sort === 'size-desc') {
+                        return (sizeOrder[(b.size || '').toLowerCase()] || 0) - (sizeOrder[(a.size || '').toLowerCase()] || 0);
+                    }
+                    return 0;
+                });
+            }
+
+            return filtered;
+        }
+
+        function updateFilters() {
+            const locations = [...new Set(enemies.flatMap(e => e.locations || []))].sort();
+            const types = [...new Set(enemies.map(e => e.type).filter(Boolean))].sort();
+            const drops = [...new Set(enemies.flatMap(e =>
+                e.drops ? e.drops.split(',').map(d => d.trim()) : []
+            ))].sort();
+
+            const locationSelect = document.getElementById('locationFilter');
+            const typeSelect = document.getElementById('typeFilter');
+            const dropSelect = document.getElementById('dropFilter');
+
+            locationSelect.innerHTML = '<option value="">All Locations</option>' +
+                locations.map(loc => `<option value="${escapeHtml(loc)}">${escapeHtml(loc)}</option>`).join('');
+
+            typeSelect.innerHTML = '<option value="">All Types</option>' +
+                types.map(type => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join('');
+
+            dropSelect.innerHTML = '<option value="">All Drops</option>' +
+                drops.map(drop => `<option value="${escapeHtml(drop)}">${escapeHtml(drop)}</option>`).join('');
+        }
+
+        function filterEnemies() {
+            renderEnemies();
+            updateClearButton();
+        }
+
+        function updateClearButton() {
+            const search = document.getElementById('searchInput').value;
+            const location = document.getElementById('locationFilter').value;
+            const type = document.getElementById('typeFilter').value;
+            const drop = document.getElementById('dropFilter').value;
+            const sort = document.getElementById('sortFilter').value;
+            const btn = document.getElementById('clearFiltersBtn');
+            btn.style.display = (search || location || type || drop || sort) ? 'block' : 'none';
+        }
+
+        function clearFilters() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('locationFilter').value = '';
+            document.getElementById('typeFilter').value = '';
+            document.getElementById('dropFilter').value = '';
+            document.getElementById('sortFilter').value = '';
+            filterEnemies();
+        }
+
+        function showAddForm() {
+            hideAllViews();
+            document.getElementById('formView').classList.remove('hidden');
+            document.getElementById('formTitle').textContent = 'Add New Enemy';
+            document.getElementById('saveButtonText').textContent = 'Save';
+            editingIndex = null;
+            currentLocationTags = [];
+            clearFormInputs();
+            renderLocationTags();
+        }
+
+        function addLocationTag() {
+            const input = document.getElementById('locationTagInput');
+            const tag = input.value.trim();
+            if (tag && !currentLocationTags.includes(tag)) {
+                currentLocationTags.push(tag);
+                input.value = '';
+                renderLocationTags();
+            }
+        }
+
+        function removeLocationTag(tag) {
+            currentLocationTags = currentLocationTags.filter(t => t !== tag);
+            renderLocationTags();
+        }
+
+        function renderLocationTags() {
+            const container = document.getElementById('locationTagList');
+            container.innerHTML = currentLocationTags.map(tag =>
+                `<span class="tag-item">📍 ${escapeHtml(tag)} <span class="tag-remove" onclick="removeLocationTag('${escapeHtml(tag)}')">×</span></span>`
+            ).join('');
+        }
+
+        document.getElementById('locationTagInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addLocationTag();
+            }
+        });
+
+        document.getElementById('enemyImageBtn').addEventListener('click', () => {
+            document.getElementById('enemyImageFile').click();
+        });
+
+        document.getElementById('enemyImageFile').addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            try {
+                currentEnemyImage = await readEnemyImageFile(file);
+                renderEnemyImagePreview(document.getElementById('enemyImagePreview'), currentEnemyImage);
+            } catch (err) {
+                alert('Could not read the image: ' + err.message);
+            }
+            e.target.value = '';
+        });
+
+        document.getElementById('clearEnemyImage').addEventListener('click', () => {
+            currentEnemyImage = '';
+            renderEnemyImagePreview(document.getElementById('enemyImagePreview'), '');
+        });
+
+        function editEnemy(index) {
+            const enemy = enemies[index];
+            editingIndex = index;
+            currentLocationTags = enemy.locations ? [...enemy.locations] : [];
+            currentEnemyImage = getEnemyImage(enemy);
+
+            document.getElementById('nameInput').value = enemy.name || '';
+            document.getElementById('typeInput').value = enemy.type || '';
+            document.getElementById('sizeInput').value = enemy.size || '';
+            document.getElementById('hpInput').value = enemy.hp || '';
+            document.getElementById('sanityInput').value = enemy.sanity || '';
+            document.getElementById('acInput').value = enemy.ac || '';
+            document.getElementById('speedInput').value = enemy.speed || '';
+            document.getElementById('colorInput').value = enemy.color || '#e05252';
+            document.getElementById('dropsInput').value = enemy.drops || '';
+            document.getElementById('attacksInput').value = enemy.attacks || '';
+            document.getElementById('weaknessesInput').value = enemy.weaknesses || '';
+            document.getElementById('resistancesInput').value = enemy.resistances || '';
+            document.getElementById('immunitiesInput').value = enemy.immunities || '';
+            document.getElementById('abilitiesInput').value = enemy.abilities || '';
+            document.getElementById('tacticsInput').value = enemy.tactics || '';
+            document.getElementById('notesInput').value = enemy.notes || '';
+
+            renderLocationTags();
+            renderEnemyImagePreview(document.getElementById('enemyImagePreview'), currentEnemyImage);
+
+            hideAllViews();
+            document.getElementById('formView').classList.remove('hidden');
+            document.getElementById('formTitle').textContent = 'Edit Enemy';
+            document.getElementById('saveButtonText').textContent = 'Update';
+        }
+
+        function saveEnemy() {
+            const name = document.getElementById('nameInput').value.trim();
+            if (!name) {
+                alert('Name is required!');
+                return;
+            }
+
+            const enemy = {
+                name: name,
+                type: document.getElementById('typeInput').value.trim(),
+                size: document.getElementById('sizeInput').value.trim(),
+                locations: [...currentLocationTags],
+                hp: document.getElementById('hpInput').value.trim(),
+                sanity: document.getElementById('sanityInput').value.trim(),
+                ac: document.getElementById('acInput').value.trim(),
+                speed: document.getElementById('speedInput').value.trim(),
+                color: document.getElementById('colorInput').value,
+                image: currentEnemyImage || '',
+                drops: document.getElementById('dropsInput').value.trim(),
+                attacks: document.getElementById('attacksInput').value.trim(),
+                weaknesses: document.getElementById('weaknessesInput').value.trim(),
+                resistances: document.getElementById('resistancesInput').value.trim(),
+                immunities: document.getElementById('immunitiesInput').value.trim(),
+                abilities: document.getElementById('abilitiesInput').value.trim(),
+                tactics: document.getElementById('tacticsInput').value.trim(),
+                notes: document.getElementById('notesInput').value.trim()
+            };
+
+            if (editingIndex !== null) {
+                enemies[editingIndex] = enemy;
+            } else {
+                enemies.push(enemy);
+            }
+
+            saveEnemiesToStorage();
+            cancelForm();
+            renderEnemies();
+            updateFilters();
+        }
+
+        function deleteEnemy(index) {
+            if (confirm('Delete this enemy?')) {
+                enemies.splice(index, 1);
+                saveEnemiesToStorage();
+                backToList();
+                renderEnemies();
+                updateFilters();
+            }
+        }
+
+        function cancelForm() {
+            document.getElementById('formView').classList.add('hidden');
+            document.getElementById('listView').classList.remove('hidden');
+            clearFormInputs();
+            currentLocationTags = [];
+            currentEnemyImage = '';
+            editingIndex = null;
+        }
+
+        function clearFormInputs() {
+            document.getElementById('nameInput').value = '';
+            document.getElementById('typeInput').value = '';
+            document.getElementById('sizeInput').value = '';
+            document.getElementById('hpInput').value = '';
+            document.getElementById('sanityInput').value = '';
+            document.getElementById('acInput').value = '';
+            document.getElementById('speedInput').value = '';
+            document.getElementById('colorInput').value = '#e05252';
+            document.getElementById('dropsInput').value = '';
+            document.getElementById('attacksInput').value = '';
+            document.getElementById('weaknessesInput').value = '';
+            document.getElementById('resistancesInput').value = '';
+            document.getElementById('immunitiesInput').value = '';
+            document.getElementById('abilitiesInput').value = '';
+            document.getElementById('tacticsInput').value = '';
+            document.getElementById('notesInput').value = '';
+            document.getElementById('locationTagInput').value = '';
+            renderEnemyImagePreview(document.getElementById('enemyImagePreview'), '');
+        }
+
+        function exportData() {
+            const dataStr = JSON.stringify(enemies, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `dnd-enemies-${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (!Array.isArray(imported)) {
+                        alert('Invalid file format!');
+                        return;
+                    }
+                    if (confirm(`Import ${imported.length} enemies? This will replace your current data.`)) {
+                        enemies = imported;
+                        saveEnemiesToStorage();
+                        renderEnemies();
+                        updateFilters();
+                        alert('Import successful!');
+                    }
+                } catch (error) {
+                    alert('Error reading file: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        document.getElementById('searchInput').addEventListener('input', () => {
+            filterEnemies();
+            updateClearButton();
+        });
+
+        function toggleCompactMode() {
+            const body = document.body;
+            const btn = document.getElementById('compactToggleBtn');
+            body.classList.toggle('compact-mode');
+            const active = body.classList.contains('compact-mode');
+            btn.textContent = active ? '🔍 Expanded View' : '🗜️ Compact View';
+            renderEnemies();
+        }
+
+        function showEnemyDetail(index) {
+            const enemy = enemies[index];
+            if (!enemy) return;
+            hideAllViews();
+            document.getElementById('detailView').classList.remove('hidden');
+            document.getElementById('detailName').textContent = enemy.name || 'Unnamed';
+
+            document.getElementById('detailEditBtn').onclick = function () { editEnemy(index); };
+            document.getElementById('detailDeleteBtn').onclick = function () {
+                if (confirm('Delete this enemy?')) {
+                    deleteEnemy(index);
+                }
+            };
+
+            const content = document.getElementById('detailContent');
+            content.innerHTML = buildEnemyDetailHTML(enemy);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function backToList() {
+            document.getElementById('detailView').classList.add('hidden');
+            document.getElementById('formView').classList.add('hidden');
+            document.getElementById('listView').classList.remove('hidden');
+            renderEnemies();
+        }
+
+        function buildEnemyDetailHTML(enemy) {
+            const locsHtml = (enemy.locations && enemy.locations.length > 0)
+                ? `<div class="location-tags">${enemy.locations.map(l => `<span class="location-tag">📍 ${escapeHtml(l)}</span>`).join('')}</div>`
+                : '';
+            const imageSrc = getEnemyImage(enemy);
+            return `
+                <div class="enemy-card detail-container">
+                    <div class="enemy-header">
+                        <div class="enemy-header-main">
+                            ${imageSrc ? `<div class="enemy-image-preview large" style="background-image:url(&quot;${escapeHtml(imageSrc)}&quot;)" aria-label="Enemy image"></div>` : `<div class="enemy-image-preview large empty">No image</div>`}
+                            <div class="enemy-text-block">
+                                <h3 class="enemy-title">${escapeHtml(enemy.name)}</h3>
+                                <p class="enemy-type">${enemy.size ? escapeHtml(enemy.size) + ' ' : ''}${escapeHtml(enemy.type || '')}</p>
+                                ${locsHtml}
+                            </div>
+                        </div>
+                        <div class="enemy-actions">
+                            <button class="btn-icon" onclick="editEnemy(${enemies.indexOf(enemy)})">✏️</button>
+                            <button class="btn-icon danger" onclick="if(confirm('Delete this enemy?')) deleteEnemy(${enemies.indexOf(enemy)})">🗑️</button>
+                        </div>
+                    </div>
+
+                    <div class="stats-grid">
+                        ${enemy.hp ? `<div class="stat-box"><div class="stat-label">HP</div><div class="stat-value">${escapeHtml(enemy.hp)}</div></div>` : ''}
+                        ${enemy.sanity ? `<div class="stat-box" style="border-color:#a78bfa33"><div class="stat-label" style="color:#a78bfa">Sanity</div><div class="stat-value">${escapeHtml(enemy.sanity)}</div></div>` : ''}
+                        ${enemy.ac ? `<div class="stat-box"><div class="stat-label">AC</div><div class="stat-value">${escapeHtml(enemy.ac)}</div></div>` : ''}
+                        ${enemy.speed ? `<div class="stat-box"><div class="stat-label">Speed</div><div class="stat-value">${escapeHtml(enemy.speed)}</div></div>` : ''}
+                        ${enemy.color && enemy.color !== '#e05252' ? `<div class="stat-box"><div class="stat-label">Color</div><div class="stat-value"><span style="display:inline-block;width:16px;height:16px;border-radius:4px;background:${escapeHtml(enemy.color)};vertical-align:middle"></span></div></div>` : ''}
+                    </div>
+
+                    ${enemy.drops ? `
+                        <div class="drops-box">
+                            <div class="drops-header">📦 Drops</div>
+                            <div class="info-text">${escapeHtml(enemy.drops)}</div>
+                        </div>
+                    ` : ''}
+
+                    ${enemy.attacks ? `<div class="info-section"><div class="info-title attacks">Attacks</div><div class="info-text">${escapeHtml(enemy.attacks)}</div></div>` : ''}
+                    ${enemy.weaknesses ? `<div class="info-section"><div class="info-title weaknesses">Weaknesses</div><div class="info-text">${escapeHtml(enemy.weaknesses)}</div></div>` : ''}
+                    ${enemy.resistances ? `<div class="info-section"><div class="info-title resistances">Resistances</div><div class="info-text">${escapeHtml(enemy.resistances)}</div></div>` : ''}
+                    ${enemy.immunities ? `<div class="info-section"><div class="info-title immunities">Immunities</div><div class="info-text">${escapeHtml(enemy.immunities)}</div></div>` : ''}
+                    ${enemy.abilities ? `<div class="info-section"><div class="info-title abilities">Special Abilities</div><div class="info-text">${escapeHtml(enemy.abilities)}</div></div>` : ''}
+                    ${enemy.tactics ? `<div class="info-section"><div class="info-title tactics">Tactics</div><div class="info-text">${escapeHtml(enemy.tactics)}</div></div>` : ''}
+                    ${enemy.notes ? `<div class="info-section"><div class="info-title notes">Notes</div><div class="info-text">${escapeHtml(enemy.notes)}</div></div>` : ''}
+                </div>
+            `;
+        }
+
+        function dragEnemy(event, index) {
+            const enemy = enemies[index];
+            if (!enemy) return;
+
+            event.dataTransfer.effectAllowed = 'copy';
+            const payload = JSON.stringify(enemy);
+            event.dataTransfer.setData('application/x-ttrpg-enemy', payload);
+            event.dataTransfer.setData('application/json', payload);
+            event.dataTransfer.setData('text/plain', enemy.name || 'Enemy');
+        }
+
+        // -------------------- Items --------------------
+        function normalizeItem(raw) {
+            return {
+                name: (raw && raw.name) ? String(raw.name) : 'Item',
+                type: (raw && raw.type) ? String(raw.type) : '',
+                weight: Number(raw && raw.weight) || 0,
+                size: Number(raw && raw.size) || 40,
+                image: (raw && (raw.image || raw.sprite || raw.avatar)) ? String(raw.image || raw.sprite || raw.avatar) : '',
+                description: (raw && (raw.description || raw.text)) ? String(raw.description || raw.text) : ''
+            };
+        }
+
+        function getFilteredItems() {
+            const q = document.getElementById('itemSearchInput').value.toLowerCase();
+            return items.filter(item => {
+                if (!q) return true;
+                return (item.name || '').toLowerCase().includes(q)
+                    || (item.type || '').toLowerCase().includes(q)
+                    || (item.description || '').toLowerCase().includes(q);
+            });
+        }
+
+        function renderItems() {
+            const list = document.getElementById('itemList');
+            const filtered = getFilteredItems();
+
+            if (!filtered.length) {
+                list.innerHTML = '<div class="empty-state">' + (items.length ? 'No items match your search.' : 'No items yet. Add your first item template!') + '</div>';
+                return;
+            }
+
+            list.innerHTML = filtered.map(item => {
+                const idx = items.indexOf(item);
+                const img = item.image ? `<div class="item-thumb" style="background-image:url(&quot;${escapeHtml(item.image)}&quot;)"></div>` : '<div class="item-thumb empty">No image</div>';
+                return `
+                    <div class="item-card" draggable="true" ondragstart="dragItem(event, ${idx})">
+                        <div class="item-header">
+                            ${img}
+                            <div style="flex:1;min-width:0;">
+                                <div class="item-title">${escapeHtml(item.name)}</div>
+                                <div class="item-meta">${escapeHtml(item.type || 'type')} · ${escapeHtml(item.size)}px · ${escapeHtml(item.weight)}</div>
+                                <div style="display:flex;gap:0.4rem;">
+                                    <button class="btn-icon" onclick="editItem(${idx})">✏️</button>
+                                    <button class="btn-icon danger" onclick="deleteItem(${idx})">🗑️</button>
+                                </div>
+                            </div>
+                        </div>
+                        ${item.description ? `<div class="item-desc">${escapeHtml(item.description)}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function showAddItemForm() {
+            document.getElementById('itemListView').classList.remove('hidden');
+            document.getElementById('itemFormView').classList.remove('hidden');
+            document.getElementById('itemFormTitle').textContent = 'Add New Item';
+            document.getElementById('itemSaveButtonText').textContent = 'Save';
+            editingItemIndex = null;
+            currentItemImage = '';
+            clearItemFormInputs();
+            renderEnemyImagePreview(document.getElementById('itemImagePreview'), '', 'No image');
+        }
+
+        function editItem(index) {
+            const item = items[index];
+            if (!item) return;
+            editingItemIndex = index;
+            document.getElementById('itemFormView').classList.remove('hidden');
+            document.getElementById('itemFormTitle').textContent = 'Edit Item';
+            document.getElementById('itemSaveButtonText').textContent = 'Update';
+
+            document.getElementById('itemNameInput').value = item.name || '';
+            document.getElementById('itemTypeInput').value = item.type || '';
+            document.getElementById('itemWeightInput').value = item.weight || 0;
+            document.getElementById('itemSizeInput').value = item.size || 40;
+            currentItemImage = item.image || '';
+            renderEnemyImagePreview(document.getElementById('itemImagePreview'), currentItemImage, 'No image');
+            document.getElementById('itemDescriptionInput').value = item.description || '';
+        }
+
+        function saveItem() {
+            const name = document.getElementById('itemNameInput').value.trim();
+            if (!name) {
+                alert('Item name is required!');
+                return;
+            }
+            const item = normalizeItem({
+                name,
+                type: document.getElementById('itemTypeInput').value.trim(),
+                weight: document.getElementById('itemWeightInput').value,
+                size: document.getElementById('itemSizeInput').value.trim(),
+                image: currentItemImage || '',
+                description: document.getElementById('itemDescriptionInput').value.trim()
+            });
+
+            if (editingItemIndex === null) items.push(item);
+            else items[editingItemIndex] = item;
+
+            saveItemsToStorage();
+            cancelItemForm();
+            renderItems();
+        }
+
+        function deleteItem(index) {
+            if (confirm('Delete this item?')) {
+                items.splice(index, 1);
+                saveItemsToStorage();
+                renderItems();
+            }
+        }
+
+        function cancelItemForm() {
+            document.getElementById('itemFormView').classList.add('hidden');
+            clearItemFormInputs();
+            editingItemIndex = null;
+        }
+
+        function clearItemFormInputs() {
+            document.getElementById('itemNameInput').value = '';
+            document.getElementById('itemTypeInput').value = '';
+            document.getElementById('itemWeightInput').value = '';
+            document.getElementById('itemSizeInput').value = '';
+            document.getElementById('itemDescriptionInput').value = '';
+        }
+
+        function exportItems() {
+            const normalized = items.map(normalizeItem);
+            const dataStr = JSON.stringify(normalized, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `dnd-items-${new Date().toISOString().split('T')[0]}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function importItems(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (!Array.isArray(imported)) {
+                        alert('Invalid item file format!');
+                        return;
+                    }
+                    if (confirm(`Import ${imported.length} items? This will replace your current item data.`)) {
+                        items = imported.map(normalizeItem);
+                        saveItemsToStorage();
+                        renderItems();
+                        alert('Item import successful!');
+                    }
+                } catch (error) {
+                    alert('Error reading item file: ' + error.message);
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        function dragItem(event, index) {
+            const item = items[index];
+            if (!item) return;
+            const payload = JSON.stringify(normalizeItem(item));
+            event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData('application/x-ttrpg-item', payload);
+            event.dataTransfer.setData('application/json', payload);
+            event.dataTransfer.setData('text/plain', item.name || 'Item');
+        }
+
+        // Initialize
+        loadEnemies();
+        loadItems();
+        document.getElementById('itemSearchInput').addEventListener('input', renderItems);
+        switchWikiSection('enemies');
+
+        document.getElementById('itemImageBtn').addEventListener('click', () => {
+            document.getElementById('itemImageFile').click();
+        });
+
+        document.getElementById('itemImageFile').addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            try {
+                currentItemImage = await readEnemyImageFile(file);
+                renderEnemyImagePreview(document.getElementById('itemImagePreview'), currentItemImage, 'No image');
+            } catch (err) {
+                alert('Could not read the image: ' + err.message);
+            }
+            e.target.value = '';
+        });
+
+        document.getElementById('clearItemImage').addEventListener('click', () => {
+            currentItemImage = '';
+            renderEnemyImagePreview(document.getElementById('itemImagePreview'), '', 'No image');
+        });
+    </script>
+</body>
+
+</html>

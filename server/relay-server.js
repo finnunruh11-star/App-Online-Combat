@@ -142,6 +142,8 @@ function maskStateForGuest(room, guestName) {
       chargesTurnEndAdd: p.type === 'player' ? clampCharge(p.chargesTurnEndAdd) : undefined,
       assignedTo: p.assignedTo || null,
       pingUntil: p.pingUntil || null,
+      emoteKey: p.emoteKey || null,
+      emoteUntil: p.emoteUntil || null,
     })),
     objects: room.state.objects,
     turnIndex: room.state.turnIndex,
@@ -437,6 +439,54 @@ wss.on('connection', ws => {
         return;
       }
 
+      if (msg.type === 'guest_emote_set' && ws.mode === 'guest') {
+        const p = room.state.participants.find(pp => pp.id === msg.participantId);
+        if (!p || p.type !== 'player') {
+          ws.send(JSON.stringify({ type: 'guest_emote_result', ok: false, reason: 'participant_not_found' }));
+          return;
+        }
+        if (p.assignedTo && !isAssignedTo(p, ws.name)) {
+          ws.send(JSON.stringify({ type: 'guest_emote_result', ok: false, reason: 'not_your_token' }));
+          return;
+        }
+
+        const key = String(msg.emoteKey || '').trim().toLowerCase();
+        if (!key) {
+          ws.send(JSON.stringify({ type: 'guest_emote_result', ok: false, reason: 'bad_emote_key' }));
+          return;
+        }
+
+        const durationRaw = Number.parseInt(msg.durationMs, 10);
+        const durationMs = Number.isNaN(durationRaw) ? 1000 : Math.max(250, Math.min(10000, durationRaw));
+        const loopsUntilInterrupt = !!msg.loop;
+        p.emoteKey = key;
+        p.emoteUntil = loopsUntilInterrupt ? null : (Date.now() + durationMs);
+
+        broadcastGuestState(room);
+        sendToHost(room, { type: 'state_echo', state: room.state });
+        ws.send(JSON.stringify({ type: 'guest_emote_result', ok: true }));
+        return;
+      }
+
+      if (msg.type === 'guest_emote_clear' && ws.mode === 'guest') {
+        const p = room.state.participants.find(pp => pp.id === msg.participantId);
+        if (!p || p.type !== 'player') {
+          ws.send(JSON.stringify({ type: 'guest_emote_result', ok: false, reason: 'participant_not_found' }));
+          return;
+        }
+        if (p.assignedTo && !isAssignedTo(p, ws.name)) {
+          ws.send(JSON.stringify({ type: 'guest_emote_result', ok: false, reason: 'not_your_token' }));
+          return;
+        }
+
+        p.emoteKey = null;
+        p.emoteUntil = null;
+        broadcastGuestState(room);
+        sendToHost(room, { type: 'state_echo', state: room.state });
+        ws.send(JSON.stringify({ type: 'guest_emote_result', ok: true }));
+        return;
+      }
+
       if (msg.type === 'charge_announce') {
         const text = String(msg.text || '').trim();
         if (!text) return;
@@ -557,13 +607,15 @@ wss.on('connection', ws => {
         const remaining = Math.max(0, (p.speed || 0) - movedSoFar);
         const allowedThisMove = remaining + extraUnits;
 
-        if (room.state.autoApproveIfWithinTolerance && distUnits <= allowedThisMove + room.state.moveToleranceUnits) {
+        if ((room.state.autoApproveIfWithinTolerance && distUnits <= allowedThisMove + room.state.moveToleranceUnits) || room.state.guestDiceThrowEnabled) {
           p.x = msg.target.x;
           p.y = msg.target.y;
           p.movedUnits = movedSoFar + distUnits;
+          p.emoteKey = null;
+          p.emoteUntil = null;
           broadcastGuestState(room);
           sendToHost(room, { type: 'state_echo', state: room.state });
-          ws.send(JSON.stringify({ type: 'request_result', ok: true, autoApproved: true, newPos: { x: p.x, y: p.y } }));
+          ws.send(JSON.stringify({ type: 'request_result', ok: true, autoApproved: true, reason: room.state.guestDiceThrowEnabled ? 'guest_dice_throw_enabled' : 'tolerance', newPos: { x: p.x, y: p.y } }));
           return;
         }
 
@@ -611,6 +663,8 @@ wss.on('connection', ws => {
             p.x = req.target.x;
             p.y = req.target.y;
             p.movedUnits = (p.movedUnits || 0) + req.distUnits;
+            p.emoteKey = null;
+            p.emoteUntil = null;
           }
           broadcastGuestState(room);
           sendToHost(room, { type: 'state_echo', state: room.state });

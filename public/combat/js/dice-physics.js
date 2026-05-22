@@ -719,6 +719,35 @@ class CombatDiceRoller{
     const rand=Math.random; // Use true randomness for throws (no seed reuse)
     d.body.angularVelocity.set((rand()-0.5)*sp,(rand()-0.5)*sp,(rand()-0.5)*sp);
     d.body.wakeUp?.();
+
+    const throwData={
+      dieIndex:0,
+      sides:d.sides,
+      sign:d.sign||1,
+      position:{x:d.body.position.x,y:d.body.position.y,z:d.body.position.z},
+      quaternion:{x:d.body.quaternion.x,y:d.body.quaternion.y,z:d.body.quaternion.z,w:d.body.quaternion.w},
+      velocity:{x:vx,y:vy,z:vz},
+      angularVelocity:{x:d.body.angularVelocity.x,y:d.body.angularVelocity.y,z:d.body.angularVelocity.z},
+    };
+
+    // Guests cannot authoritatively broadcast roll start/state/result.
+    // Route die-throws through the normal guest request flow so host simulation is shared to everyone.
+    if(!window.__isHost){
+      this._draggedDieIdx=null;
+      this._dragCurWorld=null;this._dragPrevWorld=null;
+      d.body.type=CANNON.Body.KINEMATIC;
+      d.body.velocity.set(0,0,0);
+      d.body.angularVelocity.set(0,0,0);
+      const expr=`${(d.sign||1)<0?'-':''}1d${d.sides}`;
+      if(typeof window.requestDiceRoll==='function'){
+        window.requestDiceRoll(expr,{prompted:true,fromDieThrow:true,throwData});
+      }else{
+        const r=document.getElementById('diceResult');
+        if(r){r.className='rolling';r.textContent='⏳ Request sent to DM…';}
+      }
+      return;
+    }
+
     this._draggedDieIdx=null;
     this._dragCurWorld=null;this._dragPrevWorld=null;
 
@@ -801,11 +830,37 @@ class CombatDiceRoller{
     this._rollMeta={rollId:opts.rollId||this._rollMeta.rollId||null,expression,seed:opts.seed??this._rollMeta.seed??null,shared:!!opts.shared,thrower:opts.thrower||null};
     this._setRngSeed(this._rollMeta.seed);
     if(window.__isHost && opts.broadcast!==false && window.__broadcastAppMessage){
-      window.__broadcastAppMessage({type:'dice_roll_start',...this._rollMeta,diceSettings:this.getSettings(),source:'host'});
+      window.__broadcastAppMessage({type:'dice_roll_start',...this._rollMeta,throwData:opts.throwData||null,diceSettings:this.getSettings(),source:'host'});
       syncToServer();
     }
     let idx=0;const total=dice.reduce((s,d)=>s+d.count,0);
     for(const part of dice)for(let i=0;i<part.count;i++)this.spawnDie(part.sides,idx++,total,part.sign,this._rollMeta.thrower,{passive});
+
+    const td=opts.throwData;
+    if(td&&!passive&&this._dice.length){
+      let targetIdx=Number.isInteger(td.dieIndex)?Math.max(0,Math.min(this._dice.length-1,td.dieIndex)):0;
+      if(Number.isFinite(td.sides)){
+        const sideMatch=this._dice.findIndex(di=>di.sides===td.sides&&((td.sign||1)<0?di.sign<0:di.sign>0));
+        if(sideMatch>=0)targetIdx=sideMatch;
+      }
+      const target=this._dice[targetIdx];
+      if(target){
+        if(td.position&&Number.isFinite(td.position.x)&&Number.isFinite(td.position.y)&&Number.isFinite(td.position.z)){
+          target.body.position.set(td.position.x,td.position.y,td.position.z);
+        }
+        if(td.quaternion&&Number.isFinite(td.quaternion.x)&&Number.isFinite(td.quaternion.y)&&Number.isFinite(td.quaternion.z)&&Number.isFinite(td.quaternion.w)){
+          target.body.quaternion.set(td.quaternion.x,td.quaternion.y,td.quaternion.z,td.quaternion.w);
+        }
+        if(td.velocity&&Number.isFinite(td.velocity.x)&&Number.isFinite(td.velocity.y)&&Number.isFinite(td.velocity.z)){
+          target.body.velocity.set(td.velocity.x,td.velocity.y,td.velocity.z);
+        }
+        if(td.angularVelocity&&Number.isFinite(td.angularVelocity.x)&&Number.isFinite(td.angularVelocity.y)&&Number.isFinite(td.angularVelocity.z)){
+          target.body.angularVelocity.set(td.angularVelocity.x,td.angularVelocity.y,td.angularVelocity.z);
+        }
+        target.body.wakeUp?.();
+      }
+    }
+
     if(passive){
       this._settleFrames=0;
       return;
@@ -881,7 +936,8 @@ class CombatDiceRoller{
 
   _animate=()=>{
     requestAnimationFrame(this._animate);
-    if(window.__isHost && this.world)this.world.step(1/60);
+    // Guests need local stepping for direct drag-throws; shared host rolls remain host-authoritative via replicated state.
+    if(this.world)this.world.step(1/60);
     for(const d of this._dice){d.mesh.position.copy(d.body.position);d.mesh.quaternion.copy(d.body.quaternion);}
     if(window.__isHost) this._broadcastRollingState();
     // Draw thrower names above dice groups

@@ -50,6 +50,42 @@ const RADIAL_R_OUTER = 110;
 const RADIAL_ICON    = 46;
 const PING_DISPLAY_MS = 2500;
 
+const EMOTE_DATA = [
+  {
+    key: 'dance',
+    label: 'Dance',
+    src: 'emotes/dance.gif',
+    durationMs: 4000,
+    animated: true,
+  },
+  {
+    key: 'spin',
+    label: 'Spin',
+    src: 'emotes/Spin.gif',
+    durationMs: 4000,
+    animated: true,
+  },
+  {
+    key: 'hampter',
+    label: 'Hampter',
+    src: 'emotes/hampter.png',
+    durationMs: 1000,
+    animated: false,
+  },
+  {
+    key: 'meme',
+    label: 'Meme',
+    src: 'emotes/meme.png',
+    durationMs: 1000,
+    animated: false,
+  },
+];
+const EMOTE_CENTER = 0;
+const EMOTE_SECTORS = [0, 1, 2, 3, 0, 1, 2, 3];
+const emoteImgCache = new Map();
+let emoteOverlayLayer = null;
+const emoteOverlayNodes = new Map();
+
 let pingMenuActive      = false;
 let pingMenuOrigin      = { x: 0, y: 0 };
 let pingMenuCursor      = { x: 0, y: 0 };
@@ -59,6 +95,11 @@ let activePingEffects = [];
 let pingAnimRunning   = false;
 let lastMouseScreenX  = window.innerWidth / 2;
 let lastMouseScreenY  = window.innerHeight / 2;
+let emoteMenuActive      = false;
+let emoteMenuOrigin      = { x: 0, y: 0 };
+let emoteMenuCursor      = { x: 0, y: 0 };
+let emoteHoveredSector   = -1;
+let lastValidEmoteSector = -1;
 let shownReminderTurnIndex = -1;
 let pendingInitiativeUpdate = false;
 
@@ -245,7 +286,137 @@ function ensureParticipantChargeFields(p){
   p.charges=clampChargeValue(p.charges);
   p.chargesTurnStartAdd=clampChargeGain(p.chargesTurnStartAdd);
   p.chargesTurnEndAdd=clampChargeGain(p.chargesTurnEndAdd);
+  if(p.emoteKey===undefined)p.emoteKey=null;
+  if(p.emoteUntil===undefined)p.emoteUntil=null;
   return p;
+}
+function getEmoteByKey(key){
+  return EMOTE_DATA.find(e=>e.key===key)||null;
+}
+function getEmoteImage(key){
+  const meta=getEmoteByKey(key);
+  if(!meta)return null;
+  if(!emoteImgCache.has(key)){
+    const img=new Image();
+    img.onload=()=>{
+      drawAll();
+      if(emoteMenuActive)drawEmoteMenu();
+    };
+    img.src=meta.src;
+    emoteImgCache.set(key,img);
+  }
+  return emoteImgCache.get(key);
+}
+function getEmoteOverlayLayer(){
+  if(emoteOverlayLayer&&emoteOverlayLayer.isConnected)return emoteOverlayLayer;
+  const container=document.getElementById('canvas-container');
+  if(!container)return null;
+  const layer=document.createElement('div');
+  layer.id='emote-overlay-layer';
+  layer.style.position='absolute';
+  layer.style.left='0';
+  layer.style.top='0';
+  layer.style.width='100%';
+  layer.style.height='100%';
+  layer.style.pointerEvents='none';
+  layer.style.zIndex='8';
+  container.appendChild(layer);
+  emoteOverlayLayer=layer;
+  return layer;
+}
+function removeEmoteOverlayNode(participantId){
+  const node=emoteOverlayNodes.get(participantId);
+  if(!node)return;
+  node.remove();
+  emoteOverlayNodes.delete(participantId);
+}
+function syncAnimatedEmoteOverlay(participant,px,py,pr,meta){
+  const layer=getEmoteOverlayLayer();
+  if(!layer||!participant||!meta?.src)return false;
+  let node=emoteOverlayNodes.get(participant.id);
+  if(!node){
+    node=document.createElement('img');
+    node.alt='';
+    node.style.position='absolute';
+    node.style.pointerEvents='none';
+    node.style.objectFit='cover';
+    node.style.zIndex='8';
+    emoteOverlayNodes.set(participant.id,node);
+    layer.appendChild(node);
+  }
+  if(node.dataset.src!==meta.src){
+    node.src=meta.src;
+    node.dataset.src=meta.src;
+  }
+  const rect=canvas.getBoundingClientRect();
+  if(!rect.width||!rect.height)return false;
+  const dw=pr*2.08,dh=pr*2.08;
+  const sx=(px/canvas.width)*rect.width;
+  const sy=(py/canvas.height)*rect.height;
+  const sw=(dw/canvas.width)*rect.width;
+  const sh=(dh/canvas.height)*rect.height;
+  node.style.left=`${sx-sw/2}px`;
+  node.style.top=`${sy-sh/2}px`;
+  node.style.width=`${sw}px`;
+  node.style.height=`${sh}px`;
+  return true;
+}
+function cleanupAnimatedEmoteOverlays(activeIds){
+  for(const [participantId] of emoteOverlayNodes){
+    if(!activeIds.has(participantId))removeEmoteOverlayNode(participantId);
+  }
+}
+function isEmoteActive(p,nowMs=Date.now()){
+  if(!p||!p.emoteKey)return false;
+  if(p.emoteUntil==null)return true;
+  if(p.emoteUntil<=nowMs){
+    p.emoteKey=null;
+    p.emoteUntil=null;
+    return false;
+  }
+  return true;
+}
+function isEmoteAnimated(key){
+  return !!getEmoteByKey(key)?.animated;
+}
+function applyParticipantEmote(p,emoteKey,durationMs,notifyServer=true){
+  if(!p)return false;
+  const meta=getEmoteByKey(emoteKey);
+  if(!meta)return false;
+  const loopsUntilInterrupt=!!meta.animated;
+  p.emoteKey=meta.key;
+  p.emoteUntil=loopsUntilInterrupt?null:(Date.now()+Math.max(250,Math.min(10000,parseInt(durationMs,10)||meta.durationMs)));
+  startAnimLoop();
+  drawAll();
+  if(notifyServer){
+    if(isHost)syncToServer();
+    else send({type:'guest_emote_set',participantId:p.id,emoteKey:p.emoteKey,durationMs:meta.durationMs,loop:loopsUntilInterrupt});
+  }
+  return true;
+}
+function clearParticipantEmote(p,notifyServer=true){
+  if(!p||(!p.emoteKey&&!p.emoteUntil))return false;
+  p.emoteKey=null;
+  p.emoteUntil=null;
+  drawAll();
+  if(notifyServer){
+    if(isHost)syncToServer();
+    else send({type:'guest_emote_clear',participantId:p.id});
+  }
+  return true;
+}
+function emoteTargetAtScreen(screenPos){
+  const rect=canvas.getBoundingClientRect();
+  const cx=screenPos.x-rect.left,cy=screenPos.y-rect.top;
+  if(cx<0||cy<0||cx>canvas.width||cy>canvas.height)return null;
+  return findParticipantAt({x:cx,y:cy});
+}
+function getEmoteTargetParticipant(){
+  if(isHost){
+    if(activeParticipant)return activeParticipant;
+    return emoteTargetAtScreen(emoteMenuOrigin);
+  }
+  return participants.find(p=>p.id===localSelection)||null;
 }
 function announceCharge(text){
   if(!text)return;
@@ -320,16 +491,22 @@ function showPrompt(label,def,onOk){
 }
 document.getElementById('uiConfirmOk').addEventListener('click',()=>{
   document.getElementById('uiConfirmModal').style.display='none';
-  if(_confirmCb?.ok)_confirmCb.ok();_confirmCb=null;
+  const cb=_confirmCb;
+  _confirmCb=null;
+  if(cb?.ok)cb.ok();
 });
 document.getElementById('uiConfirmCancel').addEventListener('click',()=>{
   document.getElementById('uiConfirmModal').style.display='none';
-  if(_confirmCb?.cancel)_confirmCb.cancel();_confirmCb=null;
+  const cb=_confirmCb;
+  _confirmCb=null;
+  if(cb?.cancel)cb.cancel();
 });
 document.getElementById('uiPromptOk').addEventListener('click',()=>{
   const val=document.getElementById('uiPromptInput').value;
   document.getElementById('uiPromptModal').style.display='none';
-  if(_promptCb)_promptCb(val);_promptCb=null;
+  const cb=_promptCb;
+  _promptCb=null;
+  if(cb)cb(val);
 });
 document.getElementById('uiPromptCancel').addEventListener('click',()=>{
   document.getElementById('uiPromptModal').style.display='none';
@@ -575,15 +752,40 @@ function applyIncomingDiceState(diceState){
 }
 
 function makeSharedRollPayload(req){
+  const normalizeVec3=(v)=>{
+    if(!v||typeof v!=='object')return null;
+    const x=Number(v.x),y=Number(v.y),z=Number(v.z);
+    if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z))return null;
+    return {x,y,z};
+  };
+  const normalizeQuat=(q)=>{
+    if(!q||typeof q!=='object')return null;
+    const x=Number(q.x),y=Number(q.y),z=Number(q.z),w=Number(q.w);
+    if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)||!Number.isFinite(w))return null;
+    return {x,y,z,w};
+  };
+
   const expression=String(req.expression||'1d20').trim()||'1d20';
   const reqId=req.requestId||req.id||makeDiceRequestId();
   const rollId=req.rollId||makeDiceRequestId();
   const seed=req.seed!==undefined ? (req.seed>>>0) : hashStringToSeed(`${rollId}|${expression}|${req.fromGuestName||req.guestName||'guest'}`);
+  const throwDataRaw=req.throwData&&typeof req.throwData==='object'?req.throwData:null;
+  const throwData=throwDataRaw?{
+    dieIndex:Number.isInteger(throwDataRaw.dieIndex)?Math.max(0,throwDataRaw.dieIndex):0,
+    sides:Number.isFinite(Number(throwDataRaw.sides))?Number(throwDataRaw.sides):undefined,
+    sign:Number(throwDataRaw.sign)<0?-1:1,
+    position:normalizeVec3(throwDataRaw.position),
+    quaternion:normalizeQuat(throwDataRaw.quaternion),
+    velocity:normalizeVec3(throwDataRaw.velocity),
+    angularVelocity:normalizeVec3(throwDataRaw.angularVelocity),
+  }:null;
+
   return {
     rollId,
     requestId:reqId,
     expression,
     seed,
+    throwData,
     fromGuestName:req.fromGuestName||req.guestName||'Guest',
     requestType:'dice',
     approved:true,
@@ -648,6 +850,7 @@ function approvePendingRequest(req, approve) {
           requestId: payload.requestId,
           rollId: payload.rollId,
           seed: payload.seed,
+          throwData: payload.throwData,
           shared: true
         }
       );
@@ -709,6 +912,10 @@ function handleMessage(msg) {
     syncToServer();
     return;
   }
+  if(msg.type==='guest_emote_result'&&!isHost){
+    if(msg.ok!==true)showAlert('❌ Emote rejected by DM.');
+    return;
+  }
   if (msg.type==='dice_request'&&isHost){
     const rawReq={...(msg.request||msg)};
     const ids=normalizeRequestId(rawReq);
@@ -720,7 +927,7 @@ function handleMessage(msg) {
     });
     pendingRequests=[...pendingRequests.filter(r=>r.id!==req.id),req];
     updatePendingList(pendingRequests);
-    if(req.prompted || req.autoApprove || guestDiceEnabled){
+    if(req.prompted || req.autoApprove || guestDiceEnabled || guestDiceThrowEnabled){
       approvePendingRequest(req,true);
     }
     return;
@@ -986,7 +1193,13 @@ function applyGuestState(state) {
    ANIMATION
 ================================================================ */
 function hasContinuousTokenAnimation(){
-  return participants.some(p=>p.type==='player') || movementAnimations.size>0 || damageAnimations.size>0 || performance.now()<screenShakeUntil || participants.some(p=>p.pingUntil&&p.pingUntil>Date.now());
+  const now=Date.now();
+  return participants.some(p=>p.type==='player')
+    || movementAnimations.size>0
+    || damageAnimations.size>0
+    || performance.now()<screenShakeUntil
+    || participants.some(p=>p.pingUntil&&p.pingUntil>now)
+    || participants.some(p=>isEmoteActive(p,now)&&isEmoteAnimated(p.emoteKey));
 }
 function checkAndStartAnimLoop(){if(hasContinuousTokenAnimation())startAnimLoop();}
 function startAnimLoop(){
@@ -1196,7 +1409,7 @@ function playerJumpSpriteFrameIndex(now,p){
   const count=spriteFrameCount(img);
   return loopFrameIndex(now,JUMP_SPRITE_FRAME_MS,count,seededSpriteOffset(p?.id,count));
 }
-function drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn){
+function drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn,activeAnimatedEmotes){
   const idleImg=getPlayerSpriteImage();
   const runImg=getPlayerRunSpriteImage();
   const jumpImg=getPlayerJumpSpriteImage();
@@ -1214,6 +1427,7 @@ function drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn){
   ctx.setLineDash([]);
 
   if(dmgAnim){
+    removeEmoteOverlayNode(p.id);
     const elapsed=performance.now()-dmgAnim.start;
     const count=spriteFrameCount(dmgImg);
     const totalDuration=DAMAGE_SPRITE_FRAME_MS*count;
@@ -1226,6 +1440,24 @@ function drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn){
       return;
     }
   }
+
+  if(isEmoteActive(p)){
+    const emoteMeta=getEmoteByKey(p.emoteKey);
+    if(emoteMeta?.animated){
+      if(syncAnimatedEmoteOverlay(p,px,py,pr,emoteMeta)){
+        if(activeAnimatedEmotes)activeAnimatedEmotes.add(p.id);
+        return;
+      }
+    }
+    removeEmoteOverlayNode(p.id);
+    const emoteImg=getEmoteImage(p.emoteKey);
+    if(emoteImg&&emoteImg.complete&&emoteImg.naturalWidth){
+      drawImageCover(ctx,emoteImg,px-dw/2,py-dh/2,dw,dh);
+      return;
+    }
+  }
+
+  removeEmoteOverlayNode(p.id);
 
   if(moving){
     const img=runImg;
@@ -2049,6 +2281,8 @@ if(!isHost){
   guestRequestMoveBtn.addEventListener('click',()=>{
     if(!localSelection)return setGuestStatus('Select your token first.','warn');
     if(!lastTargetPos)return setGuestStatus('Click the map to set a target first.','warn');
+    const p=participants.find(pp=>pp.id===localSelection);
+    if(p)clearParticipantEmote(p,true);
     send({type:'request_move',participantId:localSelection,target:lastTargetPos,extraUnits:parseFloat(guestExtraEl.value)||0});
     lastTargetPos=null;updateGuestTargetInfo();drawAll();
   });
@@ -2172,6 +2406,7 @@ function drawPingRings(p,now,x=p.x,y=p.y){
 
 function drawParticipants(){
   const now=performance.now();
+  const activeAnimatedEmotes=new Set();
   participants.forEach((p,i)=>{
     const pos=getParticipantDrawPos(p,now),px=pos.x,py=pos.y;
     const isActive=isHost?p===activeParticipant:p.id===localSelection;
@@ -2184,8 +2419,9 @@ function drawParticipants(){
 
     ctx.save();
     if(usePlayerSprite){
-      drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn);
+      drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn,activeAnimatedEmotes);
     } else {
+      removeEmoteOverlayNode(p.id);
       if(isTurn){ctx.shadowColor='#f5a623';ctx.shadowBlur=16;}
       ctx.beginPath();ctx.arc(px,py,pr,0,Math.PI*2);
       ctx.fillStyle=color;
@@ -2233,6 +2469,7 @@ function drawParticipants(){
 
     ctx.textAlign='left';ctx.restore();
   });
+  cleanupAnimatedEmoteOverlays(activeAnimatedEmotes);
 }
 
 function drawMoveRange(){
@@ -2432,6 +2669,7 @@ canvas.addEventListener('mousedown',evt=>{
   if(p){
     // In free-move mode, start dragging the token
     if(hostFreeMoveMode){
+      clearParticipantEmote(p,false);
       draggingParticipantRef=p;
       participantDragOffset={x:pos.x-p.x,y:pos.y-p.y};
       drawAll();return;
@@ -2455,6 +2693,7 @@ canvas.addEventListener('mousedown',evt=>{
   if(dist<=rangePx||moveConfig){
     const from={x:activeParticipant.x,y:activeParticipant.y};
     pushMoveHistory({type:'move',id:activeParticipant.id,from,movedBefore:moved});
+    clearParticipantEmote(activeParticipant,false);
     activeParticipant.x=pos.x;activeParticipant.y=pos.y;
     activeParticipant.movedUnits=moved+distUnits;
     animateParticipantMove(activeParticipant.id,from.x,from.y,pos.x,pos.y,1000);
@@ -2466,6 +2705,7 @@ canvas.addEventListener('mousedown',evt=>{
       moveConfigToggle.checked=true;moveConfig=true;
       const from={x:activeParticipant.x,y:activeParticipant.y};
       pushMoveHistory({type:'move',id:activeParticipant.id,from,movedBefore:moved});
+      clearParticipantEmote(activeParticipant,false);
       activeParticipant.x=pos.x;activeParticipant.y=pos.y;
       activeParticipant.movedUnits=moved+distUnits;
       animateParticipantMove(activeParticipant.id,from.x,from.y,pos.x,pos.y,1000);
@@ -2780,16 +3020,130 @@ function closePingMenu(){
 // Defer overlay listeners until DOM exists
 function initPingOverlayListeners(){
   pingOverlay().addEventListener('mousemove',e=>{
-    pingMenuCursor={x:e.clientX,y:e.clientY};
-    pingHoveredSector=getSector(pingMenuOrigin.x,pingMenuOrigin.y,e.clientX,e.clientY);
-    if(pingHoveredSector>=0&&pingHoveredSector<8)lastValidPingSector=pingHoveredSector;
-    drawPingMenu();
+    if(pingMenuActive){
+      pingMenuCursor={x:e.clientX,y:e.clientY};
+      pingHoveredSector=getSector(pingMenuOrigin.x,pingMenuOrigin.y,e.clientX,e.clientY);
+      if(pingHoveredSector>=0&&pingHoveredSector<8)lastValidPingSector=pingHoveredSector;
+      drawPingMenu();
+      return;
+    }
+    if(emoteMenuActive){
+      emoteMenuCursor={x:e.clientX,y:e.clientY};
+      emoteHoveredSector=getSector(emoteMenuOrigin.x,emoteMenuOrigin.y,e.clientX,e.clientY);
+      if(emoteHoveredSector>=0&&emoteHoveredSector<8)lastValidEmoteSector=emoteHoveredSector;
+      drawEmoteMenu();
+    }
   });
   pingOverlay().addEventListener('mouseup',e=>{
     if(e.button!==0)return;
-    const sec=getSector(pingMenuOrigin.x,pingMenuOrigin.y,e.clientX,e.clientY);
-    firePing(sec);
+    if(pingMenuActive){
+      const sec=getSector(pingMenuOrigin.x,pingMenuOrigin.y,e.clientX,e.clientY);
+      firePing(sec);
+      return;
+    }
+    if(emoteMenuActive){
+      const sec=getSector(emoteMenuOrigin.x,emoteMenuOrigin.y,e.clientX,e.clientY);
+      fireEmote(sec);
+    }
   });
+}
+
+function drawEmoteMenu(){
+  const W=pingCanvas().width,H=pingCanvas().height;
+  pingCtx().clearRect(0,0,W,H);
+  if(!emoteMenuActive)return;
+  const cx=emoteMenuOrigin.x,cy=emoteMenuOrigin.y;
+  const hovered=getSector(cx,cy,emoteMenuCursor.x,emoteMenuCursor.y);
+
+  pingCtx().save();
+  pingCtx().fillStyle='rgba(0,0,0,0.42)';
+  pingCtx().fillRect(0,0,W,H);
+  for(let s=0;s<8;s++){
+    const sa=(s*45-90-22.5)*Math.PI/180;
+    const ea=sa+45*Math.PI/180;
+    const idx=EMOTE_SECTORS[s];
+    const isHov=hovered===s;
+    pingCtx().beginPath();
+    pingCtx().moveTo(cx,cy);
+    pingCtx().arc(cx,cy,RADIAL_R_OUTER,sa,ea);
+    pingCtx().closePath();
+    pingCtx().fillStyle=isHov?'rgba(56,189,248,0.25)':'rgba(255,255,255,0.05)';
+    pingCtx().fill();
+    pingCtx().strokeStyle=isHov?'rgba(56,189,248,0.8)':'rgba(255,255,255,0.12)';
+    pingCtx().lineWidth=isHov?2:1;
+    pingCtx().stroke();
+
+    const midA=(s*45-90)*Math.PI/180;
+    const iconD=(RADIAL_R_INNER+RADIAL_R_OUTER)/2;
+    const ix=cx+Math.cos(midA)*iconD;
+    const iy=cy+Math.sin(midA)*iconD;
+    const meta=EMOTE_DATA[idx];
+    const img=getEmoteImage(meta.key);
+    const maxSz=isHov?RADIAL_ICON*1.16:RADIAL_ICON;
+    if(img&&img.complete&&img.naturalWidth){
+      const asp=img.naturalWidth/img.naturalHeight;
+      const dw=asp>=1?maxSz:maxSz*asp;
+      const dh=asp>=1?maxSz/asp:maxSz;
+      pingCtx().save();
+      pingCtx().globalAlpha=isHov?1:0.88;
+      pingCtx().drawImage(img,ix-dw/2,iy-dh/2,dw,dh);
+      pingCtx().restore();
+    }
+  }
+
+  const centerHovered=hovered===8;
+  pingCtx().beginPath();
+  pingCtx().arc(cx,cy,RADIAL_R_INNER,0,Math.PI*2);
+  pingCtx().fillStyle=centerHovered?'rgba(99,102,241,0.4)':'rgba(20,20,50,0.8)';
+  pingCtx().fill();
+  pingCtx().strokeStyle=centerHovered?'#818cf8':'rgba(255,255,255,0.2)';
+  pingCtx().lineWidth=1.5;
+  pingCtx().stroke();
+  pingCtx().fillStyle='rgba(255,255,255,0.9)';
+  pingCtx().font='bold 11px Source Sans 3,sans-serif';
+  pingCtx().textAlign='center';
+  pingCtx().textBaseline='middle';
+  pingCtx().fillText('EMOTE',cx,cy-2);
+
+  const currentIdx=hovered>=0&&hovered<8?EMOTE_SECTORS[hovered]:EMOTE_CENTER;
+  const meta=EMOTE_DATA[currentIdx];
+  pingCtx().font='bold 12px Source Sans 3,sans-serif';
+  pingCtx().fillStyle='rgba(255,255,255,0.95)';
+  pingCtx().textBaseline='alphabetic';
+  pingCtx().fillText(meta.label,cx,cy+RADIAL_R_OUTER+20);
+  pingCtx().restore();
+}
+
+function openEmoteMenu(sx,sy){
+  if(pingMenuActive)return;
+  emoteMenuActive=true;
+  emoteMenuOrigin={x:sx,y:sy};
+  emoteMenuCursor={x:sx,y:sy};
+  pingOverlay().classList.add('active');
+  drawEmoteMenu();
+}
+
+function closeEmoteMenu(){
+  emoteMenuActive=false;
+  emoteHoveredSector=-1;
+  lastValidEmoteSector=-1;
+  pingOverlay().classList.remove('active');
+  pingCtx().clearRect(0,0,pingCanvas().width,pingCanvas().height);
+}
+
+function fireEmote(sector){
+  if(!emoteMenuActive)return;
+  const resolved=sector===-1?(lastValidEmoteSector>=0?lastValidEmoteSector:8):sector;
+  const target=getEmoteTargetParticipant();
+  closeEmoteMenu();
+  if(!target)return;
+  if(resolved===8){
+    clearParticipantEmote(target,true);
+    return;
+  }
+  const idx=EMOTE_SECTORS[Math.max(0,Math.min(7,resolved))];
+  const meta=EMOTE_DATA[idx];
+  applyParticipantEmote(target,meta.key,meta.durationMs,true);
 }
 
 window.addEventListener('keydown',e=>{
@@ -2797,7 +3151,7 @@ window.addEventListener('keydown',e=>{
   if(e.key!=='g'&&e.key!=='G')return;
   const tag=document.activeElement.tagName;
   if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
-  if(pingMenuActive)return;
+  if(pingMenuActive||emoteMenuActive)return;
   openPingMenu(lastMouseScreenX,lastMouseScreenY);
 });
 window.addEventListener('keyup',e=>{
@@ -2805,7 +3159,27 @@ window.addEventListener('keyup',e=>{
   const sec=getSector(pingMenuOrigin.x,pingMenuOrigin.y,pingMenuCursor.x,pingMenuCursor.y);
   firePing(sec);
 });
-window.addEventListener('keydown',e=>{if(e.key==='Escape'&&pingMenuActive)closePingMenu();});
+window.addEventListener('keydown',e=>{
+  if(e.repeat)return;
+  if(e.key!=='e'&&e.key!=='E')return;
+  const tag=document.activeElement.tagName;
+  if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
+  if(pingMenuActive||emoteMenuActive)return;
+  if(!getEmoteTargetParticipant()){
+    showAlert('Select a token, or hover one, then hold E to emote.');
+    return;
+  }
+  openEmoteMenu(lastMouseScreenX,lastMouseScreenY);
+});
+window.addEventListener('keyup',e=>{
+  if((e.key!=='e'&&e.key!=='E')||!emoteMenuActive)return;
+  const sec=getSector(emoteMenuOrigin.x,emoteMenuOrigin.y,emoteMenuCursor.x,emoteMenuCursor.y);
+  fireEmote(sec);
+});
+window.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&pingMenuActive)closePingMenu();
+  if(e.key==='Escape'&&emoteMenuActive)closeEmoteMenu();
+});
 window.addEventListener('mousemove',e=>{lastMouseScreenX=e.clientX;lastMouseScreenY=e.clientY;});
 
 /* ================================================================
@@ -3304,6 +3678,7 @@ function showItemContextMenu(p,clientX,clientY){
     dmgAct.innerHTML='<span>⚔️</span><span>Damage Entity</span>';
     dmgAct.addEventListener('click',()=>{
       closeItemContextMenu();
+      const participantId=p.id;
       showPrompt('Damage type? (phys / mill / both):','phys',(dmgType)=>{
         if(!dmgType)return;
         const dt=dmgType.trim().toLowerCase();
@@ -3312,21 +3687,25 @@ function showItemContextMenu(p,clientX,clientY){
         showPrompt(`Enter ${isBoth?'both':isMill?'mill':'phys'} damage amount:`,'0',(raw)=>{
           const dmg=parseInt(raw,10);
           if(isNaN(dmg)||dmg<=0)return;
+          const target=participants.find(pp=>pp.id===participantId);
+          if(!target)return;
+          const nextAfterDamage=(cur,max)=>Math.max(0,((cur??max??0)|0)-dmg);
           if(isBoth){
-            p.hp=Math.max(0,(p.hp||0)-dmg);
-            p.sanity=Math.max(0,(p.sanity||0)-dmg);
+            target.hp=nextAfterDamage(target.hp,target.maxHp);
+            target.sanity=nextAfterDamage(target.sanity,target.maxSanity);
           } else if(isMill){
-            p.sanity=Math.max(0,(p.sanity||0)-dmg);
+            target.sanity=nextAfterDamage(target.sanity,target.maxSanity);
           } else {
-            p.hp=Math.max(0,(p.hp||0)-dmg);
+            target.hp=nextAfterDamage(target.hp,target.maxHp);
           }
-          if(p.type==='player'){
-            damageAnimations.set(p.id,{start:performance.now()});
+          clearParticipantEmote(target,false);
+          if(target.type==='player'){
+            damageAnimations.set(target.id,{start:performance.now()});
           }
           screenShakeUntil=performance.now()+350;
           startAnimLoop();
           updateInitiativeList();refreshHpControls();drawAll();syncToServer();
-          checkZeroAndOfferRemoval(p);
+          checkZeroAndOfferRemoval(target);
         });
       });
     });
@@ -3385,7 +3764,7 @@ function spawnParticipant(data){
     avatar:'',x:canvasSpawnPos.x,y:canvasSpawnPos.y,
     movedUnits:0,maxHp:data.maxHp,hp:data.maxHp,maxSanity:data.maxSanity,sanity:data.maxSanity,
     maxCharges:MAX_CHARGES,charges:0,chargesTurnStartAdd:0,chargesTurnEndAdd:0,
-    assignedTo:null,pingUntil:null,items:[]
+    assignedTo:null,pingUntil:null,emoteKey:null,emoteUntil:0,items:[]
   });
   updateInitiativeList();renderAssignmentList();drawAll();syncToServer();
 }
@@ -4498,6 +4877,7 @@ function requestDiceRoll(expr, opts={}){
     createdAt:Date.now(),
     prompted: !!opts.prompted,
     promptId: opts.promptId || null,
+    throwData: opts.throwData || null,
     autoApprove: false
   };
   activeDiceRequestId=req.id;
@@ -4513,6 +4893,7 @@ function requestDiceRoll(expr, opts={}){
   const g=document.getElementById('guestDiceStatus');
   if(g){g.textContent=opts.prompted ? '⏳ Rolling request sent…' : '⏳ Request sent to DM…';g.style.color='var(--accent2)';}
 }
+window.requestDiceRoll=requestDiceRoll;
 
 document.querySelectorAll('.dice-qbtn').forEach(btn=>{
   btn.addEventListener('click',()=>{

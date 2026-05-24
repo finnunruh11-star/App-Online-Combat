@@ -1,7 +1,8 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { pathToFileURL } = require('url');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { startRelayServer } = require('./server/relay-server');
 
 let lobbyWindow = null;
@@ -68,7 +69,7 @@ function maybeStartTunnel() {
   if (tunnelProcess) return Promise.resolve(tunnelUrl);
   const relayUrl = runtimeInfo.relayUrl;
   if (!relayUrl) return Promise.resolve(null);
-  const binary = process.env.CLOUDFLARED_BIN || 'cloudflared';
+  const binary = resolveCloudflaredBinary();
   return new Promise((resolve) => {
     try {
       const child = spawn(binary, ['tunnel', '--url', relayUrl, '--no-autoupdate'], {
@@ -108,7 +109,12 @@ function maybeStartTunnel() {
       });
       child.on('error', (err) => {
         runtimeInfo.tunnelActive = false;
-        runtimeInfo.tunnelError = err?.message || String(err);
+        const raw = err?.message || String(err);
+        if (err?.code === 'ENOENT') {
+          runtimeInfo.tunnelError = `cloudflared not found (${binary}). Install cloudflared or set CLOUDFLARED_BIN to cloudflared.exe.`;
+        } else {
+          runtimeInfo.tunnelError = raw;
+        }
         broadcastRuntimeUpdate();
         tunnelProcess = null;
         resolve(null);
@@ -120,6 +126,45 @@ function maybeStartTunnel() {
       resolve(null);
     }
   });
+}
+
+function resolveCloudflaredBinary() {
+  const fromEnv = String(process.env.CLOUDFLARED_BIN || '').trim();
+  if (fromEnv) return fromEnv;
+  if (process.platform !== 'win32') return 'cloudflared';
+
+  const discovered = discoverCloudflaredOnWindows();
+  return discovered || 'cloudflared';
+}
+
+function discoverCloudflaredOnWindows() {
+  const foundByWhere = runWhereLookup('cloudflared') || runWhereLookup('cloudflared.exe');
+  if (foundByWhere) return foundByWhere;
+
+  const candidates = [
+    path.join(process.env.ProgramFiles || '', 'Cloudflare', 'Cloudflared', 'cloudflared.exe'),
+    path.join(process.env['ProgramFiles(x86)'] || '', 'Cloudflare', 'Cloudflared', 'cloudflared.exe'),
+    path.join(process.env.LocalAppData || '', 'Programs', 'cloudflared', 'cloudflared.exe'),
+  ].filter(Boolean);
+
+  return candidates.find(p => fs.existsSync(p)) || null;
+}
+
+function runWhereLookup(name) {
+  try {
+    const result = spawnSync('where.exe', [name], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (result.status !== 0) return null;
+    const lines = String(result.stdout || '')
+      .split(/\r?\n/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    return lines[0] || null;
+  } catch {
+    return null;
+  }
 }
 
 function openCombatWindow({ mode, name, room, serverUrl }) {

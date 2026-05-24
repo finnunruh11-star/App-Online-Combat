@@ -176,12 +176,18 @@
     }
 
     let latestRuntime = null;
+    let relayUrlManuallyEdited = false;
+
+    function isLoopbackUrl(raw) {
+      const value = String(raw || '').trim().toLowerCase();
+      return value.includes('127.0.0.1') || value.includes('localhost');
+    }
 
     async function hydrateRuntime() {
       try {
         const info = await window.desktopAPI.getRuntimeInfo();
         latestRuntime = info;
-        if (info?.relayUrl) {
+        if (info?.relayUrl && !relayUrlManuallyEdited && isLoopbackUrl($('serverUrl').value)) {
           $('serverUrl').value = info.relayUrl;
           $('joinServerUrl').value = info.relayUrl;
           localStorage.setItem('ttrpg.serverUrl', info.relayUrl);
@@ -255,10 +261,12 @@
     });
 
     $('serverUrl').addEventListener('input', () => {
+      relayUrlManuallyEdited = true;
       syncServerUrlInputs('serverUrl');
       saveSettings();
     });
     $('joinServerUrl').addEventListener('input', () => {
+      relayUrlManuallyEdited = true;
       syncServerUrlInputs('joinServerUrl');
       saveSettings();
     });

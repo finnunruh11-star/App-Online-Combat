@@ -112,6 +112,10 @@
       <h2>Join a session</h2>
       <div class="grid">
         <div>
+          <label for="joinServerUrl">Relay server URL</label>
+          <input id="joinServerUrl" placeholder="https://xxxxx.trycloudflare.com" />
+        </div>
+        <div>
           <label for="guestName">Your name</label>
           <input id="guestName" placeholder="Player" />
         </div>
@@ -143,9 +147,16 @@
       roomCode: localStorage.getItem('ttrpg.roomCode') || '',
     };
     $('serverUrl').value = saved.serverUrl;
+    $('joinServerUrl').value = saved.serverUrl;
     $('hostName').value = saved.hostName;
     $('guestName').value = saved.guestName;
     $('roomCodeInput').value = saved.roomCode;
+
+    function syncServerUrlInputs(fromId) {
+      const value = $(fromId).value;
+      if (fromId === 'serverUrl') $('joinServerUrl').value = value;
+      if (fromId === 'joinServerUrl') $('serverUrl').value = value;
+    }
 
     function setStatus(text, kind = '') {
       statusEl.className = 'status ' + kind;
@@ -172,6 +183,7 @@
         latestRuntime = info;
         if (info?.relayUrl) {
           $('serverUrl').value = info.relayUrl;
+          $('joinServerUrl').value = info.relayUrl;
           localStorage.setItem('ttrpg.serverUrl', info.relayUrl);
         }
         runtimeBox.style.display = 'block';
@@ -214,7 +226,7 @@
     $('joinBtn').addEventListener('click', async () => {
       try {
         saveSettings();
-        const serverUrl = normalizeServerUrl($('serverUrl').value);
+        const serverUrl = normalizeServerUrl($('joinServerUrl').value || $('serverUrl').value);
         const guestName = $('guestName').value.trim() || 'Player';
         const room = $('roomCodeInput').value.trim().toUpperCase();
         if (!room) throw new Error('Enter a room code.');
@@ -231,7 +243,7 @@
 
     $('copyBtn').addEventListener('click', async () => {
       saveSettings();
-      const serverUrl = normalizeServerUrl(latestRuntime?.tunnelUrl || $('serverUrl').value);
+      const serverUrl = normalizeServerUrl(latestRuntime?.tunnelUrl || $('joinServerUrl').value || $('serverUrl').value);
       const room = $('roomCodeInput').value.trim().toUpperCase() || 'ROOMCODE';
       const text = `Server: ${serverUrl}\nRoom: ${room}`;
       try {
@@ -242,7 +254,16 @@
       }
     });
 
-    ['serverUrl', 'hostName', 'guestName', 'roomCodeInput'].forEach(id => {
+    $('serverUrl').addEventListener('input', () => {
+      syncServerUrlInputs('serverUrl');
+      saveSettings();
+    });
+    $('joinServerUrl').addEventListener('input', () => {
+      syncServerUrlInputs('joinServerUrl');
+      saveSettings();
+    });
+
+    ['hostName', 'guestName', 'roomCodeInput'].forEach(id => {
       $(id).addEventListener('change', saveSettings);
     });
 

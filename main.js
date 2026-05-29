@@ -70,11 +70,13 @@ function maybeStartTunnel() {
   const relayUrl = runtimeInfo.relayUrl;
   if (!relayUrl) return Promise.resolve(null);
   const binary = resolveCloudflaredBinary();
+  const needsShell = requiresCmdShell(binary);
   return new Promise((resolve) => {
     try {
       const child = spawn(binary, ['tunnel', '--url', relayUrl, '--no-autoupdate'], {
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
+        shell: needsShell,
       });
       tunnelProcess = child;
       runtimeInfo.tunnelActive = true;
@@ -129,16 +131,16 @@ function maybeStartTunnel() {
 }
 
 function resolveCloudflaredBinary() {
-  const fromEnv = String(process.env.CLOUDFLARED_BIN || '').trim();
+  const fromEnv = normalizeWindowsBinaryPath(String(process.env.CLOUDFLARED_BIN || '').trim());
   if (fromEnv) return fromEnv;
   if (process.platform !== 'win32') return 'cloudflared';
 
   const discovered = discoverCloudflaredOnWindows();
-  return discovered || 'cloudflared';
+  return normalizeWindowsBinaryPath(discovered) || 'cloudflared';
 }
 
 function discoverCloudflaredOnWindows() {
-  const foundByWhere = runWhereLookup('cloudflared') || runWhereLookup('cloudflared.exe');
+  const foundByWhere = runWhereLookup('cloudflared.exe') || runWhereLookup('cloudflared');
   if (foundByWhere) return foundByWhere;
 
   const candidates = [
@@ -161,10 +163,34 @@ function runWhereLookup(name) {
       .split(/\r?\n/)
       .map(s => s.trim())
       .filter(Boolean);
-    return lines[0] || null;
+    const exe = lines.find(s => path.extname(s).toLowerCase() === '.exe');
+    return exe || lines[0] || null;
   } catch {
     return null;
   }
+}
+
+function normalizeWindowsBinaryPath(candidate) {
+  if (!candidate) return candidate;
+  if (process.platform !== 'win32') return candidate;
+  const value = String(candidate).trim();
+  if (!value) return value;
+  const ext = path.extname(value).toLowerCase();
+  if (ext) return value;
+
+  const withExtensions = ['.exe', '.cmd', '.bat', '.com'];
+  for (const suffix of withExtensions) {
+    const next = `${value}${suffix}`;
+    if (fs.existsSync(next)) return next;
+  }
+  if (fs.existsSync(value)) return value;
+  return value;
+}
+
+function requiresCmdShell(binaryPath) {
+  if (process.platform !== 'win32') return false;
+  const ext = path.extname(String(binaryPath || '')).toLowerCase();
+  return ext === '.cmd' || ext === '.bat';
 }
 
 function openCombatWindow({ mode, name, room, serverUrl }) {

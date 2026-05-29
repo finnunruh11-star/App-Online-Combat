@@ -50,7 +50,10 @@ const RADIAL_R_OUTER = 110;
 const RADIAL_ICON    = 46;
 const PING_DISPLAY_MS = 2500;
 
-const EMOTE_DATA = [
+/* ================================================================
+   CUSTOM EMOTE PERSISTENCE
+================================================================ */
+const DEFAULT_EMOTE_DATA = [
   {
     key: 'dance',
     label: 'Dance',
@@ -79,12 +82,98 @@ const EMOTE_DATA = [
     durationMs: 1000,
     animated: false,
   },
+  {
+    key: 'oaagh',
+    label: 'OAAGH',
+    src: 'emotes/OAAGH.gif',
+    durationMs: 4000,
+    animated: true,
+  },
+  {
+    key: 'wizbait',
+    label: 'WizBait',
+    src: 'emotes/transparent WizBait.gif',
+    durationMs: 4000,
+    animated: true,
+  },
+  {
+    key: 'stare',
+    label: '100 Yard Stare',
+    src: 'emotes/100yardstare.png',
+    durationMs: 1000,
+    animated: false,
+  },
+  {
+    key: 'lfg_mage',
+    label: 'LFG Mage',
+    src: 'emotes/LFG_Mage.png',
+    durationMs: 1000,
+    animated: false,
+  },
 ];
+
+function loadCustomEmotes(){
+  try{
+    const raw=localStorage.getItem('customEmoteConfig');
+    if(raw){
+      const arr=JSON.parse(raw);
+      if(Array.isArray(arr)&&arr.length===8)return arr;
+    }
+  }catch(e){/* ignore */}
+  return DEFAULT_EMOTE_DATA.map(e=>({...e}));
+}
+function saveCustomEmotes(arr){
+  localStorage.setItem('customEmoteConfig',JSON.stringify(arr));
+}
+function applyEmoteConfig(arr){
+  EMOTE_DATA=arr;
+  emoteImgCache.clear();
+  for(const[id,node]of emoteOverlayNodes)node.remove();
+  emoteOverlayNodes.clear();
+}
+
+let EMOTE_DATA = loadCustomEmotes();
 const EMOTE_CENTER = 0;
-const EMOTE_SECTORS = [0, 1, 2, 3, 0, 1, 2, 3];
+const EMOTE_SECTORS = [0, 1, 2, 3, 4, 5, 6, 7];
 const emoteImgCache = new Map();
 let emoteOverlayLayer = null;
 const emoteOverlayNodes = new Map();
+
+/* ================================================================
+   ENEMY EMOTE PERSISTENCE (host-only)
+================================================================ */
+const DEFAULT_ENEMY_EMOTE_DATA = [
+  { key: 'enemy_cookeddog', label: 'Cooked Dog', src: 'emotes/enemy/CookedDog.png', durationMs: 1000, animated: false },
+  { key: 'enemy_disintegration', label: 'Disintegration', src: 'emotes/enemy/disintegration.gif', durationMs: 4000, animated: true },
+  { key: 'enemy_laughpoint', label: 'Laugh Point', src: 'emotes/enemy/LaughPoint.png', durationMs: 1000, animated: false },
+  { key: 'enemy_lookingup', label: 'Looking Up', src: 'emotes/enemy/LookingUp.gif', durationMs: 4000, animated: true },
+  { key: 'enemy_ragebait', label: 'Ragebait', src: 'emotes/enemy/ragebait.gif', durationMs: 4000, animated: true },
+  { key: 'enemy_skeleton', label: 'Skeleton', src: 'emotes/enemy/Skeleton.gif', durationMs: 4000, animated: true },
+  { key: 'enemy_thousandstare', label: 'Thousand Stare', src: 'emotes/enemy/ThousandStare.png', durationMs: 1000, animated: false },
+  { key: 'enemy_placeholder8', label: 'Slot 8', src: '', durationMs: 1000, animated: false },
+];
+
+function loadCustomEnemyEmotes(){
+  try{
+    const raw=localStorage.getItem('customEnemyEmoteConfig');
+    if(raw){
+      const arr=JSON.parse(raw);
+      if(Array.isArray(arr)&&arr.length===8)return arr;
+    }
+  }catch(e){/* ignore */}
+  return DEFAULT_ENEMY_EMOTE_DATA.map(e=>({...e}));
+}
+function saveCustomEnemyEmotes(arr){
+  localStorage.setItem('customEnemyEmoteConfig',JSON.stringify(arr));
+}
+function applyEnemyEmoteConfig(arr){
+  ENEMY_EMOTE_DATA=arr;
+  emoteImgCache.clear();
+  for(const[id,node]of emoteOverlayNodes)node.remove();
+  emoteOverlayNodes.clear();
+}
+
+let ENEMY_EMOTE_DATA = loadCustomEnemyEmotes();
 
 let pingMenuActive      = false;
 let pingMenuOrigin      = { x: 0, y: 0 };
@@ -100,6 +189,11 @@ let emoteMenuOrigin      = { x: 0, y: 0 };
 let emoteMenuCursor      = { x: 0, y: 0 };
 let emoteHoveredSector   = -1;
 let lastValidEmoteSector = -1;
+let enemyEmoteMenuActive      = false;
+let enemyEmoteMenuOrigin      = { x: 0, y: 0 };
+let enemyEmoteMenuCursor      = { x: 0, y: 0 };
+let enemyEmoteHoveredSector   = -1;
+let lastValidEnemyEmoteSector = -1;
 let shownReminderTurnIndex = -1;
 let pendingInitiativeUpdate = false;
 
@@ -291,21 +385,26 @@ function ensureParticipantChargeFields(p){
   return p;
 }
 function getEmoteByKey(key){
-  return EMOTE_DATA.find(e=>e.key===key)||null;
+  return EMOTE_DATA.find(e=>e.key===key)||ENEMY_EMOTE_DATA.find(e=>e.key===key)||null;
 }
 function getEmoteImage(key){
   const meta=getEmoteByKey(key);
   if(!meta)return null;
-  if(!emoteImgCache.has(key)){
+  return getEmoteImageBySrc(key,meta.src);
+}
+function getEmoteImageBySrc(cacheKey,src){
+  if(!src)return null;
+  if(!emoteImgCache.has(cacheKey)){
     const img=new Image();
     img.onload=()=>{
       drawAll();
       if(emoteMenuActive)drawEmoteMenu();
+      if(enemyEmoteMenuActive)drawEnemyEmoteMenu();
     };
-    img.src=meta.src;
-    emoteImgCache.set(key,img);
+    img.src=src;
+    emoteImgCache.set(cacheKey,img);
   }
-  return emoteImgCache.get(key);
+  return emoteImgCache.get(cacheKey);
 }
 function getEmoteOverlayLayer(){
   if(emoteOverlayLayer&&emoteOverlayLayer.isConnected)return emoteOverlayLayer;
@@ -350,7 +449,8 @@ function syncAnimatedEmoteOverlay(participant,px,py,pr,meta){
   }
   const rect=canvas.getBoundingClientRect();
   if(!rect.width||!rect.height)return false;
-  const dw=pr*2.08,dh=pr*2.08;
+  const emoteScale=meta.scale||1;
+  const dw=pr*2.08*emoteScale,dh=pr*2.08*emoteScale;
   const sx=(px/canvas.width)*rect.width;
   const sy=(py/canvas.height)*rect.height;
   const sw=(dw/canvas.width)*rect.width;
@@ -385,12 +485,15 @@ function applyParticipantEmote(p,emoteKey,durationMs,notifyServer=true){
   if(!meta)return false;
   const loopsUntilInterrupt=!!meta.animated;
   p.emoteKey=meta.key;
-  p.emoteUntil=loopsUntilInterrupt?null:(Date.now()+Math.max(250,Math.min(10000,parseInt(durationMs,10)||meta.durationMs)));
+  p.emoteSrc=meta.src;
+  p.emoteAnimated=!!meta.animated;
+  p.emoteScale=meta.scale||1;
+  p.emoteUntil=loopsUntilInterrupt?null:(Date.now()+Math.max(250,Math.min(60000,parseInt(durationMs,10)||meta.durationMs)));
   startAnimLoop();
   drawAll();
   if(notifyServer){
     if(isHost)syncToServer();
-    else send({type:'guest_emote_set',participantId:p.id,emoteKey:p.emoteKey,durationMs:meta.durationMs,loop:loopsUntilInterrupt});
+    else send({type:'guest_emote_set',participantId:p.id,emoteKey:p.emoteKey,emoteSrc:meta.src,emoteAnimated:!!meta.animated,emoteScale:meta.scale||1,durationMs:parseInt(durationMs,10)||meta.durationMs,loop:loopsUntilInterrupt});
   }
   return true;
 }
@@ -398,6 +501,9 @@ function clearParticipantEmote(p,notifyServer=true){
   if(!p||(!p.emoteKey&&!p.emoteUntil))return false;
   p.emoteKey=null;
   p.emoteUntil=null;
+  p.emoteSrc=null;
+  p.emoteAnimated=false;
+  p.emoteScale=1;
   drawAll();
   if(notifyServer){
     if(isHost)syncToServer();
@@ -525,6 +631,8 @@ function initUI() {
     document.body.classList.add('host-mode');
     document.body.classList.remove('guest-mode');
     document.getElementById('hostControls').style.display='block';
+    const enemyEmBtn=document.getElementById('enemyEmoteSettingsBtn');
+    if(enemyEmBtn)enemyEmBtn.style.display='';
     roleBadge.textContent='DM'; roleBadge.className='role-badge host';
     document.getElementById('rs-combat-flow').classList.add('host-show');
     document.getElementById('guestInitToggleWrap').style.display='flex';
@@ -1122,6 +1230,7 @@ function applyHostState(state) {
   }
   if(state.bagItems!==undefined)bagItems=normalizeBagItems(state.bagItems);
   if(state.bagWeightMultipliers!==undefined)bagWeightMultipliers=normalizeBagWeightMultipliers(state.bagWeightMultipliers);
+  // Each client keeps their own emote wheel — no longer overwrite from server state
   if(!isHost && state.latestDicePrompt) showDicePrompt(state.latestDicePrompt.expression||state.latestDicePrompt.expr||'1d20', state.latestDicePrompt.id||state.latestDicePrompt.promptId);
   if(state.diceState) applyIncomingDiceState(state.diceState);
   if(activeParticipant)activeParticipant=participants.find(p=>p.id===activeParticipant.id)||null;
@@ -1169,13 +1278,18 @@ function applyGuestState(state) {
   }
   if(state.bagItems!==undefined)bagItems=normalizeBagItems(state.bagItems);
   if(state.bagWeightMultipliers!==undefined)bagWeightMultipliers=normalizeBagWeightMultipliers(state.bagWeightMultipliers);
+  // Each client keeps their own emote wheel — no longer overwrite from host
+  // Apply overlay from host
+  if(state.overlayImageSrc!==undefined){
+    applyOverlay(state.overlayImageSrc);
+  }
   // Guests always see initiative sidebar; sync sort order
   if(state.initiativeDisplayOrder!==undefined){
     initiativeDisplayOrder=state.initiativeDisplayOrder;
   }
   applyGuestInitiativeVisibility();
 
-  const myTokenIds=participants.filter(p=>p.assignedTo===GUEST_NAME).map(p=>p.id);
+  const myTokenIds=participants.filter(p=>p.assignedTo===GUEST_NAME||(p.ownerId&&participants.find(o=>o.id===p.ownerId&&o.assignedTo===GUEST_NAME))).map(p=>p.id);
   if(myTokenIds.length>0){
     if(!localSelection||!myTokenIds.includes(localSelection))localSelection=myTokenIds[0];
     const sel=participants.find(p=>p.id===localSelection);
@@ -1199,7 +1313,7 @@ function hasContinuousTokenAnimation(){
     || damageAnimations.size>0
     || performance.now()<screenShakeUntil
     || participants.some(p=>p.pingUntil&&p.pingUntil>now)
-    || participants.some(p=>isEmoteActive(p,now)&&isEmoteAnimated(p.emoteKey));
+    || participants.some(p=>isEmoteActive(p,now)&&(p.emoteAnimated||isEmoteAnimated(p.emoteKey)));
 }
 function checkAndStartAnimLoop(){if(hasContinuousTokenAnimation())startAnimLoop();}
 function startAnimLoop(){
@@ -1259,7 +1373,8 @@ function syncToServer(){
     diceState:getCurrentSharedDiceState(),
     latestDicePrompt:lastDicePrompt,
     bagItems:normalizeBagItems(bagItems),
-    bagWeightMultipliers:normalizeBagWeightMultipliers(bagWeightMultipliers)});
+    bagWeightMultipliers:normalizeBagWeightMultipliers(bagWeightMultipliers),
+    overlayImageSrc:currentOverlaySrc||null});
 }
 
 /* ================================================================
@@ -1442,17 +1557,20 @@ function drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn,activeAnimatedEmotes
   }
 
   if(isEmoteActive(p)){
-    const emoteMeta=getEmoteByKey(p.emoteKey);
-    if(emoteMeta?.animated){
-      if(syncAnimatedEmoteOverlay(p,px,py,pr,emoteMeta)){
+    const eSrc=p.emoteSrc||(getEmoteByKey(p.emoteKey)||{}).src;
+    const eAnimated=p.emoteAnimated!==undefined?p.emoteAnimated:!!(getEmoteByKey(p.emoteKey)||{}).animated;
+    const eScale=p.emoteScale||(getEmoteByKey(p.emoteKey)||{}).scale||1;
+    if(eAnimated&&eSrc){
+      if(syncAnimatedEmoteOverlay(p,px,py,pr,{src:eSrc,scale:eScale})){
         if(activeAnimatedEmotes)activeAnimatedEmotes.add(p.id);
         return;
       }
     }
     removeEmoteOverlayNode(p.id);
-    const emoteImg=getEmoteImage(p.emoteKey);
+    const emoteImg=getEmoteImageBySrc(p.emoteKey,eSrc);
     if(emoteImg&&emoteImg.complete&&emoteImg.naturalWidth){
-      drawImageCover(ctx,emoteImg,px-dw/2,py-dh/2,dw,dh);
+      const edw=dw*eScale,edh=dh*eScale;
+      drawImageCover(ctx,emoteImg,px-edw/2,py-edh/2,edw,edh);
       return;
     }
   }
@@ -1577,14 +1695,23 @@ if(isHost){
     if(previous){
       previous.movedUnits=0;
       applyTurnChargeGain(previous,'end');
+      // Also reset movement for associated entities of the previous active
+      getAssociatedEntities(previous.id).forEach(a=>{a.movedUnits=0;});
     }
-    const newIndex=(turnIndex+1)%participants.length;
-    if(newIndex===0)roundNumber++;
+    // Advance, skipping associated entities (they share owner's turn)
+    let newIndex=(turnIndex+1)%participants.length;
+    let safety=participants.length;
+    while(participants[newIndex]&&participants[newIndex].ownerId&&safety-->0){
+      newIndex=(newIndex+1)%participants.length;
+    }
+    if(newIndex<=turnIndex)roundNumber++;
     turnIndex=newIndex;
     activeParticipant=participants[turnIndex];
     if(activeParticipant){
       activeParticipant.movedUnits=0;
       applyTurnChargeGain(activeParticipant,'start');
+      // Also reset movement for associated entities of new active
+      getAssociatedEntities(activeParticipant.id).forEach(a=>{a.movedUnits=0;});
     }
     checkRemindersForTurn(turnIndex);
     updateInitiativeList();refreshHpControls();drawAll();checkAndStartAnimLoop();syncToServer();
@@ -1616,9 +1743,13 @@ if(isHost){
     if(!participants.length){showAlert('Add participants first.');return;}
     participants.sort((a,b)=>b.initiative-a.initiative);
     participants.forEach(p=>{p.movedUnits=0;ensureParticipantChargeFields(p);});
-    turnIndex=0;roundNumber=1;activeParticipant=participants[0];
+    // Find first non-associated participant for initial turn
+    turnIndex=0;
+    while(turnIndex<participants.length&&participants[turnIndex].ownerId)turnIndex++;
+    if(turnIndex>=participants.length)turnIndex=0;
+    roundNumber=1;activeParticipant=participants[turnIndex];
     applyTurnChargeGain(activeParticipant,'start');
-    shownReminderTurnIndex=-1;checkRemindersForTurn(0);
+    shownReminderTurnIndex=-1;checkRemindersForTurn(turnIndex);
     updateInitiativeList();refreshHpControls();drawAll();checkAndStartAnimLoop();syncToServer();
   });
 
@@ -1768,7 +1899,7 @@ if(isHost){
   function renderAssignmentList(){
     assignmentList.innerHTML='';
     if(!connectedGuests.length){assignmentList.innerHTML='<div class="small">No guests connected yet.</div>';return;}
-    const playerTokens=participants.filter(p=>p.type==='player');
+    const playerTokens=participants.filter(p=>p.type==='player'&&!p.ownerId);
     if(!playerTokens.length){assignmentList.innerHTML='<div class="small">No player tokens yet.</div>';return;}
     playerTokens.forEach(p=>{
       const row=document.createElement('div');row.className='assign-token-row';
@@ -1783,7 +1914,10 @@ if(isHost){
 
   saveAssignmentsBtn.addEventListener('click',()=>{
     participants.forEach(p=>p.assignedTo=null);
-    assignmentList.querySelectorAll('select').forEach(sel=>{const pid=sel.dataset.pid,g=sel.value;if(pid&&g){const p=participants.find(pp=>pp.id===pid);if(p)p.assignedTo=g;}});
+    assignmentList.querySelectorAll('select').forEach(sel=>{const pid=sel.dataset.pid,g=sel.value;if(pid&&g){const p=participants.find(pp=>pp.id===pid);if(p){p.assignedTo=g;
+      // Also assign associated entities to the same guest
+      participants.filter(pp=>pp.ownerId===p.id).forEach(pp=>{pp.assignedTo=g;});
+    }}});
     syncToServer();saveAssignmentsBtn.textContent='✅ Saved!';setTimeout(()=>{saveAssignmentsBtn.textContent='💾 Save Assignments';},2000);
   });
 }
@@ -1854,7 +1988,7 @@ function checkZeroAndOfferRemoval(p){
   setTimeout(()=>{
     showConfirm(`${p.name}'s ${reason}. Remove from combat?`,()=>{
       if(measuring&&measuring.entity===p)measuring=null;
-      participants=participants.filter(pp=>pp!==p);
+      participants=participants.filter(pp=>pp!==p&&pp.ownerId!==p.id);
       if(activeParticipant===p)activeParticipant=null;
       if(turnIndex>=participants.length)turnIndex=Math.max(0,participants.length-1);
       if(participants.length&&!activeParticipant)activeParticipant=participants[turnIndex]||null;
@@ -1865,7 +1999,8 @@ function checkZeroAndOfferRemoval(p){
 function removeParticipant(p){
   showConfirm(`Remove "${p.name}" from combat?`,()=>{
     if(measuring&&measuring.entity===p)measuring=null;
-    participants=participants.filter(pp=>pp!==p);
+    // Also remove associated entities
+    participants=participants.filter(pp=>pp!==p&&pp.ownerId!==p.id);
     if(activeParticipant===p)activeParticipant=null;
     if(turnIndex>=participants.length)turnIndex=Math.max(0,participants.length-1);
     if(participants.length&&!activeParticipant)activeParticipant=participants[turnIndex]||null;
@@ -1881,10 +2016,10 @@ function updateInitiativeList(){
   const container=document.getElementById('initiativeOrderRight');
   container.innerHTML='';
 
-  // Build display-sorted list without mutating the real array
+  // Build display-sorted list without mutating the real array — exclude associated entities
   const display=initiativeDisplayOrder==='alpha'
-    ?[...participants].sort((a,b)=>a.name.localeCompare(b.name))
-    :[...participants];
+    ?[...participants].filter(p=>!p.ownerId).sort((a,b)=>a.name.localeCompare(b.name))
+    :[...participants].filter(p=>!p.ownerId);
 
   display.forEach(p=>{
     ensureParticipantChargeFields(p);
@@ -1973,6 +2108,33 @@ function updateInitiativeList(){
     if(isHost)buildReminderUI(p,div);
     buildItemsUI(p,div);
 
+    // Associated entities section
+    const assocEntities=getAssociatedEntities(p.id);
+    if(assocEntities.length){
+      const assocSec=document.createElement('div');assocSec.className='assoc-section';
+      const assocLbl=document.createElement('div');assocLbl.className='assoc-label';assocLbl.textContent='🐾 Associated Entities';
+      assocSec.appendChild(assocLbl);
+      assocEntities.forEach(a=>{
+        const row=document.createElement('div');row.className='assoc-entity';
+        const nm=document.createElement('span');nm.className='assoc-name';nm.textContent=a.name;
+        row.appendChild(nm);
+        if(a.maxHp!==undefined){
+          const hpSp=document.createElement('span');hpSp.className='assoc-hp';
+          hpSp.style.color=(a.hp??0)<=0?'#f87171':'#4ade80';
+          hpSp.textContent=`${a.hp??0}/${a.maxHp}`;
+          row.appendChild(hpSp);
+        }
+        const eBtn=document.createElement('button');eBtn.className='assoc-btn';eBtn.textContent='✏️';eBtn.title='Edit';
+        eBtn.addEventListener('click',e=>{e.stopPropagation();openEditModal(a);});
+        row.appendChild(eBtn);
+        const dBtn=document.createElement('button');dBtn.className='assoc-btn assoc-del';dBtn.textContent='✕';dBtn.title='Remove';
+        dBtn.addEventListener('click',e=>{e.stopPropagation();removeAssociatedEntity(a);});
+        row.appendChild(dBtn);
+        assocSec.appendChild(row);
+      });
+      div.appendChild(assocSec);
+    }
+
     // Only clicking the top info area selects the participant — NOT clicks on forms/inputs inside
     top.style.cursor='pointer';
     top.addEventListener('mousedown',()=>{
@@ -2010,10 +2172,10 @@ function updateRightInitiative(){
   const container=document.getElementById('initiativeOrderRight');
   container.innerHTML='';
 
-  // Apply display sort order set by host
+  // Apply display sort order set by host — exclude associated entities from main list
   const display=initiativeDisplayOrder==='alpha'
-    ?[...participants].sort((a,b)=>a.name.localeCompare(b.name))
-    :[...participants];
+    ?[...participants].filter(p=>!p.ownerId).sort((a,b)=>a.name.localeCompare(b.name))
+    :[...participants].filter(p=>!p.ownerId);
 
   display.forEach(p=>{
     ensureParticipantChargeFields(p);
@@ -2098,6 +2260,28 @@ function updateRightInitiative(){
       p.pingUntil=Date.now()+3000;startAnimLoop();
     });
     div.appendChild(pingBtn);
+
+    // Associated entities section (guest view)
+    const assocEntities=participants.filter(a=>a.ownerId===p.id);
+    if(assocEntities.length){
+      const assocSec=document.createElement('div');assocSec.className='assoc-section';
+      const assocLbl=document.createElement('div');assocLbl.className='assoc-label';assocLbl.textContent='🐾 Associated';
+      assocSec.appendChild(assocLbl);
+      assocEntities.forEach(a=>{
+        const row=document.createElement('div');row.className='assoc-entity';
+        const nm=document.createElement('span');nm.className='assoc-name';
+        nm.textContent=a.publicDisplayName||a.name||'Entity';
+        row.appendChild(nm);
+        if(a.maxHp!==undefined){
+          const hpSp=document.createElement('span');hpSp.className='assoc-hp';
+          hpSp.style.color=(a.hp??0)<=0?'#f87171':'#4ade80';
+          hpSp.textContent=`${a.hp??0}/${a.maxHp}`;
+          row.appendChild(hpSp);
+        }
+        assocSec.appendChild(row);
+      });
+      div.appendChild(assocSec);
+    }
 
     // Click to select own token
     if(p.type==='player'&&(!p.assignedTo||p.assignedTo===GUEST_NAME)){
@@ -2414,14 +2598,57 @@ function drawParticipants(){
     const color=p.color||(p.type==='player'?'#6366f1':'#e05252');
     if(p.pingUntil&&p.pingUntil>Date.now())drawPingRings(p,Date.now(),px,py);
 
-    const usePlayerSprite=p.type==='player';
+    const usePlayerSprite=p.type==='player'&&!p.ownerId;
     const avatarImg=usePlayerSprite?null:getAvatarImage(participantPortraitSrc(p));
 
     ctx.save();
     if(usePlayerSprite){
       drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn,activeAnimatedEmotes);
     } else {
-      removeEmoteOverlayNode(p.id);
+      // Check for active emote on enemy/non-player-sprite tokens
+      if(isEmoteActive(p)){
+        const eSrc=p.emoteSrc||(getEmoteByKey(p.emoteKey)||{}).src;
+        const eAnimated=p.emoteAnimated!==undefined?p.emoteAnimated:!!(getEmoteByKey(p.emoteKey)||{}).animated;
+        const eScale=p.emoteScale||(getEmoteByKey(p.emoteKey)||{}).scale||1;
+        if(eAnimated&&eSrc){
+          if(syncAnimatedEmoteOverlay(p,px,py,pr,{src:eSrc,scale:eScale})){
+            if(activeAnimatedEmotes)activeAnimatedEmotes.add(p.id);
+            ctx.restore();
+            ctx.save();
+            ctx.shadowBlur=0;
+            ctx.font='bold 12px Source Sans 3, sans-serif';ctx.textAlign='center';
+            if(isHost){
+              ctx.fillStyle='#e8e8f0';ctx.fillText(p.name,px,py-pr-6);
+            } else {
+              const label=guestDisplayName(p)||(p.ownerId?p.name:null);
+              if(label){ctx.fillStyle='#e8e8f0';ctx.fillText(label,px,py-pr-6);}
+            }
+            ctx.restore();
+            return;
+          }
+        }
+        removeEmoteOverlayNode(p.id);
+        const emoteImg=getEmoteImageBySrc(p.emoteKey,eSrc);
+        if(emoteImg&&emoteImg.complete&&emoteImg.naturalWidth){
+          const dw=pr*2.08*eScale,dh=pr*2.08*eScale;
+          drawImageCover(ctx,emoteImg,px-dw/2,py-dh/2,dw,dh);
+          ctx.restore();
+          ctx.save();
+          ctx.shadowBlur=0;
+          ctx.font='bold 12px Source Sans 3, sans-serif';ctx.textAlign='center';
+          if(isHost){
+            ctx.fillStyle='#e8e8f0';ctx.fillText(p.name,px,py-pr-6);
+          } else {
+            const label=guestDisplayName(p)||(p.ownerId?p.name:null);
+            if(label){ctx.fillStyle='#e8e8f0';ctx.fillText(label,px,py-pr-6);}
+          }
+          ctx.restore();
+          return;
+        }
+      } else {
+        removeEmoteOverlayNode(p.id);
+      }
+
       if(isTurn){ctx.shadowColor='#f5a623';ctx.shadowBlur=16;}
       ctx.beginPath();ctx.arc(px,py,pr,0,Math.PI*2);
       ctx.fillStyle=color;
@@ -2449,13 +2676,13 @@ function drawParticipants(){
       if(p.maxHp!==undefined){ctx.font='11px Source Sans 3, sans-serif';ctx.fillStyle=(p.hp??0)<=0?'#f87171':'#4ade80';ctx.fillText(`${p.hp??'?'}/${p.maxHp} HP`,px,hostLabelY);hostLabelY-=12;}
       if(p.maxSanity!==undefined){ctx.font='11px Source Sans 3, sans-serif';const sr=(p.sanity??0)/p.maxSanity;ctx.fillStyle=(p.sanity??0)<=0?'#f87171':(sr<0.3?'#f5a623':'#a78bfa');ctx.fillText(`${p.sanity??'?'}/${p.maxSanity} San`,px,hostLabelY);}
     } else {
-      const label=guestDisplayName(p);
+      const label=guestDisplayName(p)||(p.ownerId?p.name:null);
       if(label){ctx.fillStyle='#e8e8f0';ctx.fillText(label,px,py-pr-6);}
-      if(p.type==='player'&&p.maxHp!==undefined){
+      if((p.type==='player'||p.ownerId)&&p.maxHp!==undefined){
         ctx.font='11px Source Sans 3, sans-serif';ctx.fillStyle=(p.hp??0)<=0?'#f87171':'#4ade80';
         ctx.fillText(`${p.hp??'?'}/${p.maxHp}`,px,py-pr-18);
       }
-      if(p.assignedTo===GUEST_NAME){ctx.save();ctx.strokeStyle='#818cf8';ctx.lineWidth=2;ctx.setLineDash([3,3]);ctx.beginPath();ctx.arc(px,py,pr+6,0,Math.PI*2);ctx.stroke();ctx.restore();}
+      if(p.assignedTo===GUEST_NAME||(p.ownerId&&participants.find(o=>o.id===p.ownerId&&o.assignedTo===GUEST_NAME))){ctx.save();ctx.strokeStyle='#818cf8';ctx.lineWidth=2;ctx.setLineDash([3,3]);ctx.beginPath();ctx.arc(px,py,pr+6,0,Math.PI*2);ctx.stroke();ctx.restore();}
     }
 
     if(p.speed>0){
@@ -2618,11 +2845,14 @@ canvas.addEventListener('mousedown',evt=>{
       return;
     }
     const p=findParticipantAt(pos);
-    if(p&&p.publicDisplayName){
-      if(!p.assignedTo||p.assignedTo===GUEST_NAME){
+    if(p&&(p.publicDisplayName||p.ownerId)){
+      const isOwned=p.assignedTo===GUEST_NAME;
+      const isAssocOfMine=p.ownerId&&participants.find(o=>o.id===p.ownerId&&o.assignedTo===GUEST_NAME);
+      if(!p.assignedTo||isOwned||isAssocOfMine){
         localSelection=p.id;
-        const myTokenIds=participants.filter(pp=>pp.assignedTo===GUEST_NAME).map(pp=>pp.id);
-        guestSelectedInfo.textContent=myTokenIds.length>1?`🎮 ${p.publicDisplayName} — click others to switch`:`✅ Selected: ${p.publicDisplayName}`;
+        const myTokenIds=participants.filter(pp=>pp.assignedTo===GUEST_NAME||(pp.ownerId&&participants.find(o=>o.id===pp.ownerId&&o.assignedTo===GUEST_NAME))).map(pp=>pp.id);
+        const displayName=p.publicDisplayName||p.name||'Entity';
+        guestSelectedInfo.textContent=myTokenIds.length>1?`🎮 ${displayName} — click others to switch`:`✅ Selected: ${displayName}`;
         refreshGuestChargeControls();
         drawAll();
       }
@@ -2679,7 +2909,7 @@ canvas.addEventListener('mousedown',evt=>{
 
   if(!activeParticipant)return;
   moveConfig=moveConfigToggle.checked;
-  if(!moveConfig&&activeParticipant!==participants[turnIndex])return;
+  if(!moveConfig&&activeParticipant!==participants[turnIndex]&&!(activeParticipant.ownerId&&participants[turnIndex]&&participants[turnIndex].id===activeParticipant.ownerId))return;
 
   const extra=parseInt(moveRangeEl.value)||0;
   const moved=activeParticipant.movedUnits||0;
@@ -3032,6 +3262,13 @@ function initPingOverlayListeners(){
       emoteHoveredSector=getSector(emoteMenuOrigin.x,emoteMenuOrigin.y,e.clientX,e.clientY);
       if(emoteHoveredSector>=0&&emoteHoveredSector<8)lastValidEmoteSector=emoteHoveredSector;
       drawEmoteMenu();
+      return;
+    }
+    if(enemyEmoteMenuActive){
+      enemyEmoteMenuCursor={x:e.clientX,y:e.clientY};
+      enemyEmoteHoveredSector=getSector(enemyEmoteMenuOrigin.x,enemyEmoteMenuOrigin.y,e.clientX,e.clientY);
+      if(enemyEmoteHoveredSector>=0&&enemyEmoteHoveredSector<8)lastValidEnemyEmoteSector=enemyEmoteHoveredSector;
+      drawEnemyEmoteMenu();
     }
   });
   pingOverlay().addEventListener('mouseup',e=>{
@@ -3044,6 +3281,11 @@ function initPingOverlayListeners(){
     if(emoteMenuActive){
       const sec=getSector(emoteMenuOrigin.x,emoteMenuOrigin.y,e.clientX,e.clientY);
       fireEmote(sec);
+      return;
+    }
+    if(enemyEmoteMenuActive){
+      const sec=getSector(enemyEmoteMenuOrigin.x,enemyEmoteMenuOrigin.y,e.clientX,e.clientY);
+      fireEnemyEmote(sec);
     }
   });
 }
@@ -3115,7 +3357,7 @@ function drawEmoteMenu(){
 }
 
 function openEmoteMenu(sx,sy){
-  if(pingMenuActive)return;
+  if(pingMenuActive||enemyEmoteMenuActive)return;
   emoteMenuActive=true;
   emoteMenuOrigin={x:sx,y:sy};
   emoteMenuCursor={x:sx,y:sy};
@@ -3151,7 +3393,7 @@ window.addEventListener('keydown',e=>{
   if(e.key!=='g'&&e.key!=='G')return;
   const tag=document.activeElement.tagName;
   if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
-  if(pingMenuActive||emoteMenuActive)return;
+  if(pingMenuActive||emoteMenuActive||enemyEmoteMenuActive)return;
   openPingMenu(lastMouseScreenX,lastMouseScreenY);
 });
 window.addEventListener('keyup',e=>{
@@ -3164,7 +3406,7 @@ window.addEventListener('keydown',e=>{
   if(e.key!=='e'&&e.key!=='E')return;
   const tag=document.activeElement.tagName;
   if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
-  if(pingMenuActive||emoteMenuActive)return;
+  if(pingMenuActive||emoteMenuActive||enemyEmoteMenuActive)return;
   if(!getEmoteTargetParticipant()){
     showAlert('Select a token, or hover one, then hold E to emote.');
     return;
@@ -3176,9 +3418,132 @@ window.addEventListener('keyup',e=>{
   const sec=getSector(emoteMenuOrigin.x,emoteMenuOrigin.y,emoteMenuCursor.x,emoteMenuCursor.y);
   fireEmote(sec);
 });
+
+/* --- Enemy Emote Wheel (host-only, R key) --- */
+function drawEnemyEmoteMenu(){
+  const W=pingCanvas().width,H=pingCanvas().height;
+  pingCtx().clearRect(0,0,W,H);
+  if(!enemyEmoteMenuActive)return;
+  const cx=enemyEmoteMenuOrigin.x,cy=enemyEmoteMenuOrigin.y;
+  const hovered=getSector(cx,cy,enemyEmoteMenuCursor.x,enemyEmoteMenuCursor.y);
+
+  pingCtx().save();
+  pingCtx().fillStyle='rgba(0,0,0,0.42)';
+  pingCtx().fillRect(0,0,W,H);
+  for(let s=0;s<8;s++){
+    const sa=(s*45-90-22.5)*Math.PI/180;
+    const ea=sa+45*Math.PI/180;
+    const idx=EMOTE_SECTORS[s];
+    const isHov=hovered===s;
+    pingCtx().beginPath();
+    pingCtx().moveTo(cx,cy);
+    pingCtx().arc(cx,cy,RADIAL_R_OUTER,sa,ea);
+    pingCtx().closePath();
+    pingCtx().fillStyle=isHov?'rgba(248,113,113,0.25)':'rgba(255,255,255,0.05)';
+    pingCtx().fill();
+    pingCtx().strokeStyle=isHov?'rgba(248,113,113,0.8)':'rgba(255,255,255,0.12)';
+    pingCtx().lineWidth=isHov?2:1;
+    pingCtx().stroke();
+
+    const midA=(s*45-90)*Math.PI/180;
+    const iconD=(RADIAL_R_INNER+RADIAL_R_OUTER)/2;
+    const ix=cx+Math.cos(midA)*iconD;
+    const iy=cy+Math.sin(midA)*iconD;
+    const meta=ENEMY_EMOTE_DATA[idx];
+    if(meta&&meta.src){
+      const img=getEmoteImage(meta.key);
+      const maxSz=isHov?RADIAL_ICON*1.16:RADIAL_ICON;
+      if(img&&img.complete&&img.naturalWidth){
+        const asp=img.naturalWidth/img.naturalHeight;
+        const dw=asp>=1?maxSz:maxSz*asp;
+        const dh=asp>=1?maxSz/asp:maxSz;
+        pingCtx().save();
+        pingCtx().globalAlpha=isHov?1:0.88;
+        pingCtx().drawImage(img,ix-dw/2,iy-dh/2,dw,dh);
+        pingCtx().restore();
+      }
+    }
+  }
+
+  const centerHovered=hovered===8;
+  pingCtx().beginPath();
+  pingCtx().arc(cx,cy,RADIAL_R_INNER,0,Math.PI*2);
+  pingCtx().fillStyle=centerHovered?'rgba(248,113,113,0.4)':'rgba(20,20,50,0.8)';
+  pingCtx().fill();
+  pingCtx().strokeStyle=centerHovered?'#f87171':'rgba(255,255,255,0.2)';
+  pingCtx().lineWidth=1.5;
+  pingCtx().stroke();
+  pingCtx().fillStyle='rgba(255,255,255,0.9)';
+  pingCtx().font='bold 11px Source Sans 3,sans-serif';
+  pingCtx().textAlign='center';
+  pingCtx().textBaseline='middle';
+  pingCtx().fillText('ENEMY',cx,cy-2);
+
+  const currentIdx=hovered>=0&&hovered<8?EMOTE_SECTORS[hovered]:0;
+  const meta=ENEMY_EMOTE_DATA[currentIdx];
+  pingCtx().font='bold 12px Source Sans 3,sans-serif';
+  pingCtx().fillStyle='rgba(255,255,255,0.95)';
+  pingCtx().textBaseline='alphabetic';
+  pingCtx().fillText(meta?meta.label:'',cx,cy+RADIAL_R_OUTER+20);
+  pingCtx().restore();
+}
+
+function openEnemyEmoteMenu(sx,sy){
+  if(pingMenuActive||emoteMenuActive||enemyEmoteMenuActive)return;
+  enemyEmoteMenuActive=true;
+  enemyEmoteMenuOrigin={x:sx,y:sy};
+  enemyEmoteMenuCursor={x:sx,y:sy};
+  pingOverlay().classList.add('active');
+  drawEnemyEmoteMenu();
+}
+
+function closeEnemyEmoteMenu(){
+  enemyEmoteMenuActive=false;
+  enemyEmoteHoveredSector=-1;
+  lastValidEnemyEmoteSector=-1;
+  pingOverlay().classList.remove('active');
+  pingCtx().clearRect(0,0,pingCanvas().width,pingCanvas().height);
+}
+
+function fireEnemyEmote(sector){
+  if(!enemyEmoteMenuActive)return;
+  const resolved=sector===-1?(lastValidEnemyEmoteSector>=0?lastValidEnemyEmoteSector:8):sector;
+  const target=getEmoteTargetParticipant();
+  closeEnemyEmoteMenu();
+  if(!target)return;
+  if(resolved===8){
+    clearParticipantEmote(target,true);
+    return;
+  }
+  const idx=EMOTE_SECTORS[Math.max(0,Math.min(7,resolved))];
+  const meta=ENEMY_EMOTE_DATA[idx];
+  if(!meta||!meta.src)return;
+  applyParticipantEmote(target,meta.key,meta.durationMs,true);
+}
+
+window.addEventListener('keydown',e=>{
+  if(e.repeat)return;
+  if(e.key!=='r'&&e.key!=='R')return;
+  if(!isHost)return;
+  const tag=document.activeElement.tagName;
+  if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA')return;
+  if(pingMenuActive||emoteMenuActive||enemyEmoteMenuActive)return;
+  if(!getEmoteTargetParticipant()){
+    showAlert('Select a token, or hover one, then hold R to use enemy emotes.');
+    return;
+  }
+  openEnemyEmoteMenu(lastMouseScreenX,lastMouseScreenY);
+});
+window.addEventListener('keyup',e=>{
+  if((e.key!=='r'&&e.key!=='R')||!enemyEmoteMenuActive)return;
+  const sec=getSector(enemyEmoteMenuOrigin.x,enemyEmoteMenuOrigin.y,enemyEmoteMenuCursor.x,enemyEmoteMenuCursor.y);
+  fireEnemyEmote(sec);
+});
+
 window.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&pingMenuActive)closePingMenu();
   if(e.key==='Escape'&&emoteMenuActive)closeEmoteMenu();
+  if(e.key==='Escape'&&enemyEmoteMenuActive)closeEnemyEmoteMenu();
 });
 window.addEventListener('mousemove',e=>{lastMouseScreenX=e.clientX;lastMouseScreenY=e.clientY;});
 
@@ -3718,6 +4083,14 @@ function showItemContextMenu(p,clientX,clientY){
       openEnemyDetails(p);
     });
     actions.appendChild(detAct);
+    // Add Associated Entity
+    const addAssocAct=document.createElement('div');addAssocAct.className='ctx-action';
+    addAssocAct.innerHTML='<span>🐾</span><span>Add Associated Entity</span>';
+    addAssocAct.addEventListener('click',()=>{
+      closeItemContextMenu();
+      openAssocSpawnModal(p);
+    });
+    actions.appendChild(addAssocAct);
   }
 
   // Position & show
@@ -3816,6 +4189,61 @@ if(isHost){
       openWikiTemplateSelector();
     });
   }
+}
+
+/* ================================================================
+   ASSOCIATED ENTITIES — spawn, edit, remove
+================================================================ */
+let _assocOwner=null;
+function openAssocSpawnModal(owner){
+  _assocOwner=owner;
+  document.getElementById('assocOwnerLabel').textContent=owner.name;
+  document.getElementById('assocSpawnName').value='';
+  document.getElementById('assocSpawnSpeed').value='30';
+  document.getElementById('assocSpawnHp').value='5';
+  document.getElementById('assocSpawnRadius').value=Math.max(5,Math.round((owner.radius||PARTICLE_RADIUS)*0.7));
+  document.getElementById('assocSpawnModal').style.display='flex';
+  setTimeout(()=>{const el=document.getElementById('assocSpawnName');el.focus();el.select();},50);
+}
+if(isHost){
+  document.getElementById('assocSpawnOk').addEventListener('click',()=>{
+    if(!_assocOwner)return;
+    const name=document.getElementById('assocSpawnName').value.trim();
+    if(!name){showAlert('Enter a name for the associated entity.');return;}
+    const speed=parseInt(document.getElementById('assocSpawnSpeed').value)||0;
+    const maxHpRaw=parseInt(document.getElementById('assocSpawnHp').value);
+    const maxHp=isNaN(maxHpRaw)?undefined:maxHpRaw;
+    const radius=Math.max(5,parseInt(document.getElementById('assocSpawnRadius').value)||10);
+    const color=_assocOwner.color||(_assocOwner.type==='player'?'#6366f1':'#e05252');
+    participants.push({
+      id:'p_'+Date.now()+'_'+Math.floor(Math.random()*1000),
+      name,initiative:_assocOwner.initiative,type:_assocOwner.type,
+      speed,color,radius,
+      avatar:'',x:_assocOwner.x+(_assocOwner.radius||PARTICLE_RADIUS)*2,y:_assocOwner.y,
+      movedUnits:0,maxHp,hp:maxHp,maxSanity:undefined,sanity:undefined,
+      maxCharges:MAX_CHARGES,charges:0,chargesTurnStartAdd:0,chargesTurnEndAdd:0,
+      assignedTo:_assocOwner.assignedTo||null,pingUntil:null,emoteKey:null,emoteUntil:0,items:[],
+      ownerId:_assocOwner.id,spriteFacing:1
+    });
+    document.getElementById('assocSpawnModal').style.display='none';
+    _assocOwner=null;
+    updateInitiativeList();renderAssignmentList();drawAll();syncToServer();
+  });
+  document.getElementById('assocSpawnCancel').addEventListener('click',()=>{
+    document.getElementById('assocSpawnModal').style.display='none';_assocOwner=null;
+  });
+}
+
+function getAssociatedEntities(ownerId){
+  return participants.filter(p=>p.ownerId===ownerId);
+}
+
+function removeAssociatedEntity(p){
+  showConfirm(`Remove associated entity "${p.name}"?`,()=>{
+    if(measuring&&measuring.entity===p)measuring=null;
+    participants=participants.filter(pp=>pp!==p);
+    updateInitiativeList();refreshHpControls();drawAll();syncToServer();
+  });
 }
 
 /* ================================================================
@@ -4930,3 +5358,408 @@ const guestDiceRequestBtn=document.getElementById('guestRequestDice');
 if(guestDiceRequestBtn){
   guestDiceRequestBtn.addEventListener('click',()=>requestDiceRoll(document.getElementById('guestDiceExpr')?.value||document.getElementById('diceExpr').value||'1d20'));
 }
+
+/* ================================================================
+   EMOTE SETTINGS PANEL
+================================================================ */
+(function initEmoteSettings(){
+  const modal=document.getElementById('emoteSettingsModal');
+  const grid=document.getElementById('emoteSlotGrid');
+  const openBtn=document.getElementById('emoteSettingsBtn');
+  const closeBtn=document.getElementById('emoteSettingsClose');
+  const saveBtn=document.getElementById('emoteSettingsSave');
+  const resetBtn=document.getElementById('emoteSettingsReset');
+  if(!modal||!grid||!openBtn)return;
+
+  let pendingSlots=[];
+
+  function buildSlots(){
+    grid.innerHTML='';
+    pendingSlots=EMOTE_DATA.map((e,i)=>({...e}));
+    pendingSlots.forEach((slot,i)=>{
+      const card=document.createElement('div');
+      card.style.cssText='background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px';
+      card.innerHTML=`
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="emote-slot-preview" data-idx="${i}" style="width:44px;height:44px;border-radius:8px;border:1px dashed rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;overflow:hidden;background:rgba(0,0,0,.3);flex-shrink:0;cursor:pointer" title="Click to upload">
+            ${slot.src?`<img src="${escHtml(slot.src)}" style="max-width:100%;max-height:100%;object-fit:contain">`:'<span style="font-size:18px;opacity:.4">+</span>'}
+          </div>
+          <div style="flex:1;min-width:0">
+            <input class="emote-slot-label" data-idx="${i}" value="${escHtml(slot.label)}" placeholder="Label" style="width:100%;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px;box-sizing:border-box">
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="emote-slot-anim" data-idx="${i}" ${slot.animated?'checked':''}> Animated (GIF)</label>
+          <button type="button" class="emote-slot-clear" data-idx="${i}" style="margin-left:auto;background:none;border:none;color:var(--danger);font-size:11px;cursor:pointer;opacity:.7">✕ Clear</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <label style="white-space:nowrap">Scale:</label>
+          <input type="range" class="emote-slot-scale" data-idx="${i}" min="0.3" max="3" step="0.1" value="${slot.scale||1}" style="flex:1;height:14px;cursor:pointer">
+          <span class="emote-slot-scale-val" data-idx="${i}" style="min-width:28px;text-align:right">${(slot.scale||1).toFixed(1)}x</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <label style="white-space:nowrap">Duration:</label>
+          <input type="number" class="emote-slot-duration" data-idx="${i}" min="250" max="60000" step="250" value="${slot.durationMs||1000}" style="width:70px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:3px 6px;color:var(--text);font-size:11px;text-align:center">
+          <span style="opacity:.6">ms</span>
+        </div>
+        <input type="file" class="emote-slot-file" data-idx="${i}" accept="image/*" style="display:none">
+      `;
+      grid.appendChild(card);
+    });
+
+    // Event delegation
+    grid.querySelectorAll('.emote-slot-preview').forEach(el=>{
+      el.addEventListener('click',()=>{
+        const idx=parseInt(el.dataset.idx);
+        grid.querySelector(`.emote-slot-file[data-idx="${idx}"]`).click();
+      });
+    });
+    grid.querySelectorAll('.emote-slot-file').forEach(el=>{
+      el.addEventListener('change',e=>{
+        const idx=parseInt(el.dataset.idx);
+        const file=e.target.files[0];
+        if(!file)return;
+        if(file.size>4*1024*1024){showAlert('Max file size is 4 MB.');return;}
+        const reader=new FileReader();
+        reader.onload=()=>{
+          const dataUrl=reader.result;
+          pendingSlots[idx].src=dataUrl;
+          pendingSlots[idx].key='custom_'+idx+'_'+Date.now();
+          const isGif=file.type==='image/gif'||file.name.toLowerCase().endsWith('.gif');
+          pendingSlots[idx].animated=isGif;
+          pendingSlots[idx].durationMs=isGif?4000:1000;
+          if(!pendingSlots[idx].label||pendingSlots[idx].label===DEFAULT_EMOTE_DATA[idx]?.label){
+            pendingSlots[idx].label=file.name.replace(/\.[^.]+$/,'').slice(0,20);
+          }
+          // Update preview
+          const prev=grid.querySelector(`.emote-slot-preview[data-idx="${idx}"]`);
+          prev.innerHTML=`<img src="${escHtml(dataUrl)}" style="max-width:100%;max-height:100%;object-fit:contain">`;
+          // Update animated checkbox
+          grid.querySelector(`.emote-slot-anim[data-idx="${idx}"]`).checked=isGif;
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+    grid.querySelectorAll('.emote-slot-label').forEach(el=>{
+      el.addEventListener('input',()=>{
+        const idx=parseInt(el.dataset.idx);
+        pendingSlots[idx].label=el.value;
+      });
+    });
+    grid.querySelectorAll('.emote-slot-anim').forEach(el=>{
+      el.addEventListener('change',()=>{
+        const idx=parseInt(el.dataset.idx);
+        pendingSlots[idx].animated=el.checked;
+        if(el.checked)pendingSlots[idx].durationMs=4000;
+        const durEl=grid.querySelector(`.emote-slot-duration[data-idx="${idx}"]`);
+        if(durEl)durEl.value=pendingSlots[idx].durationMs;
+      });
+    });
+    grid.querySelectorAll('.emote-slot-scale').forEach(el=>{
+      el.addEventListener('input',()=>{
+        const idx=parseInt(el.dataset.idx);
+        const val=parseFloat(el.value)||1;
+        pendingSlots[idx].scale=val;
+        grid.querySelector(`.emote-slot-scale-val[data-idx="${idx}"]`).textContent=val.toFixed(1)+'x';
+      });
+    });
+    grid.querySelectorAll('.emote-slot-duration').forEach(el=>{
+      el.addEventListener('change',()=>{
+        const idx=parseInt(el.dataset.idx);
+        const val=Math.max(250,Math.min(60000,parseInt(el.value,10)||1000));
+        pendingSlots[idx].durationMs=val;
+        el.value=val;
+      });
+    });
+    grid.querySelectorAll('.emote-slot-clear').forEach(el=>{
+      el.addEventListener('click',(e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        const idx=parseInt(el.dataset.idx);
+        const def=DEFAULT_EMOTE_DATA[idx];
+        pendingSlots[idx]={...def};
+        const prev=grid.querySelector(`.emote-slot-preview[data-idx="${idx}"]`);
+        prev.innerHTML=def.src?`<img src="${escHtml(def.src)}" style="max-width:100%;max-height:100%;object-fit:contain">`:'<span style="font-size:18px;opacity:.4">+</span>';
+        const labelInput=grid.querySelector(`.emote-slot-label[data-idx="${idx}"]`);
+        labelInput.value=def.label;
+        grid.querySelector(`.emote-slot-anim[data-idx="${idx}"]`).checked=def.animated;
+        grid.querySelector(`.emote-slot-scale[data-idx="${idx}"]`).value=def.scale||1;
+        grid.querySelector(`.emote-slot-scale-val[data-idx="${idx}"]`).textContent=(def.scale||1).toFixed(1)+'x';
+        grid.querySelector(`.emote-slot-duration[data-idx="${idx}"]`).value=def.durationMs||1000;
+      });
+    });
+  }
+
+  function openModal(){
+    buildSlots();
+    modal.style.display='flex';
+  }
+  function closeModal(){
+    modal.style.display='none';
+  }
+
+  openBtn.addEventListener('click',openModal);
+  closeBtn.addEventListener('click',closeModal);
+  modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});
+
+  saveBtn.addEventListener('click',()=>{
+    // Validate
+    for(let i=0;i<pendingSlots.length;i++){
+      if(!pendingSlots[i].src){showAlert(`Slot ${i+1} has no image. Upload one or reset to defaults.`);return;}
+      if(!pendingSlots[i].label.trim()){pendingSlots[i].label='Emote '+(i+1);}
+    }
+    saveCustomEmotes(pendingSlots);
+    applyEmoteConfig(pendingSlots.map(e=>({...e})));
+    closeModal();
+  });
+
+  resetBtn.addEventListener('click',()=>{
+    localStorage.removeItem('customEmoteConfig');
+    applyEmoteConfig(DEFAULT_EMOTE_DATA.map(e=>({...e})));
+    closeModal();
+  });
+})();
+
+/* ================================================================
+   ENEMY EMOTE SETTINGS PANEL (host-only)
+================================================================ */
+(function initEnemyEmoteSettings(){
+  const modal=document.getElementById('enemyEmoteSettingsModal');
+  const grid=document.getElementById('enemyEmoteSlotGrid');
+  const openBtn=document.getElementById('enemyEmoteSettingsBtn');
+  const closeBtn=document.getElementById('enemyEmoteSettingsClose');
+  const saveBtn=document.getElementById('enemyEmoteSettingsSave');
+  const resetBtn=document.getElementById('enemyEmoteSettingsReset');
+  if(!modal||!grid||!openBtn)return;
+
+  let pendingSlots=[];
+
+  function buildSlots(){
+    grid.innerHTML='';
+    pendingSlots=ENEMY_EMOTE_DATA.map((e,i)=>({...e}));
+    pendingSlots.forEach((slot,i)=>{
+      const card=document.createElement('div');
+      card.style.cssText='background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px';
+      card.innerHTML=`
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="enemy-emote-slot-preview" data-idx="${i}" style="width:44px;height:44px;border-radius:8px;border:1px dashed rgba(248,113,113,.3);display:flex;align-items:center;justify-content:center;overflow:hidden;background:rgba(0,0,0,.3);flex-shrink:0;cursor:pointer" title="Click to upload">
+            ${slot.src?`<img src="${escHtml(slot.src)}" style="max-width:100%;max-height:100%;object-fit:contain">`:'<span style="font-size:18px;opacity:.4">+</span>'}
+          </div>
+          <div style="flex:1;min-width:0">
+            <input class="enemy-emote-slot-label" data-idx="${i}" value="${escHtml(slot.label)}" placeholder="Label" style="width:100%;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px;box-sizing:border-box">
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="enemy-emote-slot-anim" data-idx="${i}" ${slot.animated?'checked':''}> Animated (GIF)</label>
+          <button type="button" class="enemy-emote-slot-clear" data-idx="${i}" style="margin-left:auto;background:none;border:none;color:var(--danger);font-size:11px;cursor:pointer;opacity:.7">✕ Clear</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <label style="white-space:nowrap">Scale:</label>
+          <input type="range" class="enemy-emote-slot-scale" data-idx="${i}" min="0.3" max="3" step="0.1" value="${slot.scale||1}" style="flex:1;height:14px;cursor:pointer">
+          <span class="enemy-emote-slot-scale-val" data-idx="${i}" style="min-width:28px;text-align:right">${(slot.scale||1).toFixed(1)}x</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <label style="white-space:nowrap">Duration:</label>
+          <input type="number" class="enemy-emote-slot-duration" data-idx="${i}" min="250" max="60000" step="250" value="${slot.durationMs||1000}" style="width:70px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:3px 6px;color:var(--text);font-size:11px;text-align:center">
+          <span style="opacity:.6">ms</span>
+        </div>
+        <input type="file" class="enemy-emote-slot-file" data-idx="${i}" accept="image/*" style="display:none">
+      `;
+      grid.appendChild(card);
+    });
+
+    grid.querySelectorAll('.enemy-emote-slot-preview').forEach(el=>{
+      el.addEventListener('click',()=>{
+        const idx=parseInt(el.dataset.idx);
+        grid.querySelector(`.enemy-emote-slot-file[data-idx="${idx}"]`).click();
+      });
+    });
+    grid.querySelectorAll('.enemy-emote-slot-file').forEach(el=>{
+      el.addEventListener('change',e=>{
+        const idx=parseInt(el.dataset.idx);
+        const file=e.target.files[0];
+        if(!file)return;
+        if(file.size>4*1024*1024){showAlert('Max file size is 4 MB.');return;}
+        const reader=new FileReader();
+        reader.onload=()=>{
+          const dataUrl=reader.result;
+          pendingSlots[idx].src=dataUrl;
+          pendingSlots[idx].key='enemy_custom_'+idx+'_'+Date.now();
+          const isGif=file.type==='image/gif'||file.name.toLowerCase().endsWith('.gif');
+          pendingSlots[idx].animated=isGif;
+          pendingSlots[idx].durationMs=isGif?4000:1000;
+          if(!pendingSlots[idx].label||pendingSlots[idx].label===DEFAULT_ENEMY_EMOTE_DATA[idx]?.label){
+            pendingSlots[idx].label=file.name.replace(/\.[^.]+$/,'').slice(0,20);
+          }
+          const prev=grid.querySelector(`.enemy-emote-slot-preview[data-idx="${idx}"]`);
+          prev.innerHTML=`<img src="${escHtml(dataUrl)}" style="max-width:100%;max-height:100%;object-fit:contain">`;
+          grid.querySelector(`.enemy-emote-slot-anim[data-idx="${idx}"]`).checked=isGif;
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+    grid.querySelectorAll('.enemy-emote-slot-label').forEach(el=>{
+      el.addEventListener('input',()=>{
+        const idx=parseInt(el.dataset.idx);
+        pendingSlots[idx].label=el.value;
+      });
+    });
+    grid.querySelectorAll('.enemy-emote-slot-anim').forEach(el=>{
+      el.addEventListener('change',()=>{
+        const idx=parseInt(el.dataset.idx);
+        pendingSlots[idx].animated=el.checked;
+        if(el.checked)pendingSlots[idx].durationMs=4000;
+        const durEl=grid.querySelector(`.enemy-emote-slot-duration[data-idx="${idx}"]`);
+        if(durEl)durEl.value=pendingSlots[idx].durationMs;
+      });
+    });
+    grid.querySelectorAll('.enemy-emote-slot-scale').forEach(el=>{
+      el.addEventListener('input',()=>{
+        const idx=parseInt(el.dataset.idx);
+        const val=parseFloat(el.value)||1;
+        pendingSlots[idx].scale=val;
+        grid.querySelector(`.enemy-emote-slot-scale-val[data-idx="${idx}"]`).textContent=val.toFixed(1)+'x';
+      });
+    });
+    grid.querySelectorAll('.enemy-emote-slot-duration').forEach(el=>{
+      el.addEventListener('change',()=>{
+        const idx=parseInt(el.dataset.idx);
+        const val=Math.max(250,Math.min(60000,parseInt(el.value,10)||1000));
+        pendingSlots[idx].durationMs=val;
+        el.value=val;
+      });
+    });
+    grid.querySelectorAll('.enemy-emote-slot-clear').forEach(el=>{
+      el.addEventListener('click',(e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        const idx=parseInt(el.dataset.idx);
+        const def=DEFAULT_ENEMY_EMOTE_DATA[idx];
+        pendingSlots[idx]={...def};
+        const prev=grid.querySelector(`.enemy-emote-slot-preview[data-idx="${idx}"]`);
+        prev.innerHTML=def.src?`<img src="${escHtml(def.src)}" style="max-width:100%;max-height:100%;object-fit:contain">`:'<span style="font-size:18px;opacity:.4">+</span>';
+        const labelInput=grid.querySelector(`.enemy-emote-slot-label[data-idx="${idx}"]`);
+        labelInput.value=def.label;
+        grid.querySelector(`.enemy-emote-slot-anim[data-idx="${idx}"]`).checked=def.animated;
+        grid.querySelector(`.enemy-emote-slot-scale[data-idx="${idx}"]`).value=def.scale||1;
+        grid.querySelector(`.enemy-emote-slot-scale-val[data-idx="${idx}"]`).textContent=(def.scale||1).toFixed(1)+'x';
+        grid.querySelector(`.enemy-emote-slot-duration[data-idx="${idx}"]`).value=def.durationMs||1000;
+      });
+    });
+  }
+
+  function openModal(){
+    buildSlots();
+    modal.style.display='flex';
+  }
+  function closeModal(){
+    modal.style.display='none';
+  }
+
+  openBtn.addEventListener('click',openModal);
+  closeBtn.addEventListener('click',closeModal);
+  modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});
+
+  saveBtn.addEventListener('click',()=>{
+    for(let i=0;i<pendingSlots.length;i++){
+      if(!pendingSlots[i].src){
+        // Allow empty slots for enemy emotes (placeholder for 8th)
+        if(!pendingSlots[i].label.trim())pendingSlots[i].label='Slot '+(i+1);
+        continue;
+      }
+      if(!pendingSlots[i].label.trim()){pendingSlots[i].label='Enemy Emote '+(i+1);}
+    }
+    saveCustomEnemyEmotes(pendingSlots);
+    applyEnemyEmoteConfig(pendingSlots.map(e=>({...e})));
+    closeModal();
+  });
+
+  resetBtn.addEventListener('click',()=>{
+    localStorage.removeItem('customEnemyEmoteConfig');
+    applyEnemyEmoteConfig(DEFAULT_ENEMY_EMOTE_DATA.map(e=>({...e})));
+    closeModal();
+  });
+})();
+
+/* ================================================================
+   CANVAS OVERLAY SYSTEM
+================================================================ */
+let currentOverlaySrc = null;
+
+function applyOverlay(src){
+  currentOverlaySrc = src||null;
+  const wrap = document.getElementById('canvas-overlay');
+  const img = document.getElementById('canvas-overlay-img');
+  if(!wrap||!img)return;
+  if(!src){
+    wrap.style.display='none';
+    img.removeAttribute('src');
+  } else {
+    img.src=src;
+    wrap.style.display='block';
+  }
+}
+
+function getRecentOverlays(){
+  try{return JSON.parse(localStorage.getItem('recentOverlays')||'[]');}catch{return[];}
+}
+function saveToRecentOverlays(src){
+  if(!src)return;
+  let recent=getRecentOverlays();
+  // Remove duplicate if exists
+  recent=recent.filter(r=>r!==src);
+  recent.unshift(src);
+  if(recent.length>10)recent=recent.slice(0,10);
+  try{localStorage.setItem('recentOverlays',JSON.stringify(recent));}catch(e){
+    // If localStorage is full (large data URLs), drop oldest
+    recent=recent.slice(0,5);
+    try{localStorage.setItem('recentOverlays',JSON.stringify(recent));}catch{}
+  }
+  renderRecentOverlays();
+}
+function renderRecentOverlays(){
+  const grid=document.getElementById('recentOverlaysGrid');
+  if(!grid)return;
+  const recent=getRecentOverlays();
+  grid.innerHTML='';
+  if(!recent.length){grid.innerHTML='<div style="grid-column:1/-1;font-size:11px;color:var(--text-muted)">No recent overlays.</div>';return;}
+  recent.forEach((src,i)=>{
+    const thumb=document.createElement('div');
+    thumb.style.cssText='width:100%;aspect-ratio:1;border-radius:6px;border:1px solid var(--border);background:#111 center/cover no-repeat;cursor:pointer;position:relative';
+    thumb.style.backgroundImage=`url('${src.replace(/'/g,"\\'")}')`;
+    thumb.title=`Overlay ${i+1} — click to apply`;
+    thumb.addEventListener('click',()=>{
+      applyOverlay(src);
+      if(isHost)syncToServer();
+    });
+    grid.appendChild(thumb);
+  });
+}
+
+(function initOverlayControls(){
+  const uploadEl=document.getElementById('overlayUpload');
+  const clearBtn=document.getElementById('clearOverlay');
+  if(uploadEl){
+    uploadEl.addEventListener('change',e=>{
+      const file=e.target.files[0];
+      if(!file)return;
+      if(file.size>8*1024*1024){showAlert('Max overlay size is 8 MB.');return;}
+      const reader=new FileReader();
+      reader.onload=()=>{
+        const dataUrl=reader.result;
+        applyOverlay(dataUrl);
+        saveToRecentOverlays(dataUrl);
+        if(isHost)syncToServer();
+      };
+      reader.readAsDataURL(file);
+      uploadEl.value='';
+    });
+  }
+  if(clearBtn){
+    clearBtn.addEventListener('click',()=>{
+      applyOverlay(null);
+      if(isHost)syncToServer();
+    });
+  }
+  renderRecentOverlays();
+})();

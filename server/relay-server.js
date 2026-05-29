@@ -134,8 +134,8 @@ function maskStateForGuest(room, guestName) {
       publicDisplayName: p.type === 'player' ? p.name : null,
       movedUnits: p.movedUnits || 0,
       speed: p.speed || 0,
-      hp: p.type === 'player' ? p.hp : undefined,
-      maxHp: p.type === 'player' ? p.maxHp : undefined,
+      hp: (p.type === 'player' || p.ownerId) ? p.hp : undefined,
+      maxHp: (p.type === 'player' || p.ownerId) ? p.maxHp : undefined,
       charges: p.type === 'player' ? clampCharge(p.charges) : undefined,
       maxCharges: p.type === 'player' ? MAX_CHARGES : undefined,
       chargesTurnStartAdd: p.type === 'player' ? clampCharge(p.chargesTurnStartAdd) : undefined,
@@ -144,6 +144,8 @@ function maskStateForGuest(room, guestName) {
       pingUntil: p.pingUntil || null,
       emoteKey: p.emoteKey || null,
       emoteUntil: p.emoteUntil || null,
+      ownerId: p.ownerId || null,
+      name: p.ownerId ? p.name : undefined,
     })),
     objects: room.state.objects,
     turnIndex: room.state.turnIndex,
@@ -161,6 +163,8 @@ function maskStateForGuest(room, guestName) {
     diceState: room.state.diceState,
     bagItems: (room.state.bagItems || []).filter(item => item?.visible !== false),
     bagWeightMultipliers: room.state.bagWeightMultipliers || { fin: 0, nad: 0, kat: 0 },
+    customEmotes: room.state.customEmotes || null,
+    customEnemyEmotes: room.state.customEnemyEmotes || null,
     roomCode: room.code,
     guestName: guestName || null,
   };
@@ -208,6 +212,7 @@ function updateStateFromHost(room, msg) {
     'moveToleranceUnits', 'autoApproveIfWithinTolerance', 'guestDrawEnabled', 'guestInitiativeEnabled',
     'guestDiceEnabled', 'guestDiceThrowEnabled', 'initiativeDisplayOrder', 'diceSettings',
     'diceState', 'latestDicePrompt', 'bagItems', 'bagWeightMultipliers',
+    'customEmotes', 'customEnemyEmotes',
   ];
   for (const key of keys) {
     if (src[key] !== undefined) room.state[key] = deepClone(src[key]);
@@ -585,13 +590,18 @@ wss.on('connection', ws => {
           ws.send(JSON.stringify({ type: 'request_result', ok: false, reason: 'participant_not_found' }));
           return;
         }
-        if (p.assignedTo && !isAssignedTo(p, ws.name)) {
+        // Determine effective owner for assignment/turn checks
+        const effectiveOwner = p.ownerId
+          ? room.state.participants.find(pp => pp.id === p.ownerId)
+          : p;
+        const assignedTarget = effectiveOwner || p;
+        if (assignedTarget.assignedTo && !isAssignedTo(assignedTarget, ws.name)) {
           ws.send(JSON.stringify({ type: 'request_result', ok: false, reason: 'not_your_token' }));
           return;
         }
-        if (p.assignedTo) {
+        if (assignedTarget.assignedTo) {
           const turnP = room.state.participants[room.state.turnIndex];
-          if (!turnP || turnP.id !== p.id) {
+          if (!turnP || (turnP.id !== assignedTarget.id && turnP.id !== p.id)) {
             ws.send(JSON.stringify({ type: 'request_result', ok: false, reason: 'not_your_turn' }));
             return;
           }

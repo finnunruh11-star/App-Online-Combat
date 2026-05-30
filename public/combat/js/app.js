@@ -390,17 +390,21 @@ function getEmoteByKey(key){
 function getEmoteImage(key){
   const meta=getEmoteByKey(key);
   if(!meta)return null;
-  if(!emoteImgCache.has(key)){
+  return getEmoteImageBySrc(key,meta.src);
+}
+function getEmoteImageBySrc(cacheKey,src){
+  if(!src)return null;
+  if(!emoteImgCache.has(cacheKey)){
     const img=new Image();
     img.onload=()=>{
       drawAll();
       if(emoteMenuActive)drawEmoteMenu();
       if(enemyEmoteMenuActive)drawEnemyEmoteMenu();
     };
-    img.src=meta.src;
-    emoteImgCache.set(key,img);
+    img.src=src;
+    emoteImgCache.set(cacheKey,img);
   }
-  return emoteImgCache.get(key);
+  return emoteImgCache.get(cacheKey);
 }
 function getEmoteOverlayLayer(){
   if(emoteOverlayLayer&&emoteOverlayLayer.isConnected)return emoteOverlayLayer;
@@ -481,12 +485,15 @@ function applyParticipantEmote(p,emoteKey,durationMs,notifyServer=true){
   if(!meta)return false;
   const loopsUntilInterrupt=!!meta.animated;
   p.emoteKey=meta.key;
-  p.emoteUntil=loopsUntilInterrupt?null:(Date.now()+Math.max(250,Math.min(10000,parseInt(durationMs,10)||meta.durationMs)));
+  p.emoteSrc=meta.src;
+  p.emoteAnimated=!!meta.animated;
+  p.emoteScale=meta.scale||1;
+  p.emoteUntil=loopsUntilInterrupt?null:(Date.now()+Math.max(250,Math.min(60000,parseInt(durationMs,10)||meta.durationMs)));
   startAnimLoop();
   drawAll();
   if(notifyServer){
     if(isHost)syncToServer();
-    else send({type:'guest_emote_set',participantId:p.id,emoteKey:p.emoteKey,durationMs:meta.durationMs,loop:loopsUntilInterrupt});
+    else send({type:'guest_emote_set',participantId:p.id,emoteKey:p.emoteKey,emoteSrc:meta.src,emoteAnimated:!!meta.animated,emoteScale:meta.scale||1,durationMs:parseInt(durationMs,10)||meta.durationMs,loop:loopsUntilInterrupt});
   }
   return true;
 }
@@ -494,6 +501,9 @@ function clearParticipantEmote(p,notifyServer=true){
   if(!p||(!p.emoteKey&&!p.emoteUntil))return false;
   p.emoteKey=null;
   p.emoteUntil=null;
+  p.emoteSrc=null;
+  p.emoteAnimated=false;
+  p.emoteScale=1;
   drawAll();
   if(notifyServer){
     if(isHost)syncToServer();
@@ -1220,12 +1230,7 @@ function applyHostState(state) {
   }
   if(state.bagItems!==undefined)bagItems=normalizeBagItems(state.bagItems);
   if(state.bagWeightMultipliers!==undefined)bagWeightMultipliers=normalizeBagWeightMultipliers(state.bagWeightMultipliers);
-  if(state.customEmotes&&Array.isArray(state.customEmotes)&&state.customEmotes.length===8){
-    applyEmoteConfig(state.customEmotes.map(e=>({...e})));
-  }
-  if(state.customEnemyEmotes&&Array.isArray(state.customEnemyEmotes)&&state.customEnemyEmotes.length===8){
-    applyEnemyEmoteConfig(state.customEnemyEmotes.map(e=>({...e})));
-  }
+  // Each client keeps their own emote wheel — no longer overwrite from server state
   if(!isHost && state.latestDicePrompt) showDicePrompt(state.latestDicePrompt.expression||state.latestDicePrompt.expr||'1d20', state.latestDicePrompt.id||state.latestDicePrompt.promptId);
   if(state.diceState) applyIncomingDiceState(state.diceState);
   if(activeParticipant)activeParticipant=participants.find(p=>p.id===activeParticipant.id)||null;
@@ -1273,14 +1278,7 @@ function applyGuestState(state) {
   }
   if(state.bagItems!==undefined)bagItems=normalizeBagItems(state.bagItems);
   if(state.bagWeightMultipliers!==undefined)bagWeightMultipliers=normalizeBagWeightMultipliers(state.bagWeightMultipliers);
-  // Apply host custom emotes on guest side
-  if(state.customEmotes&&Array.isArray(state.customEmotes)&&state.customEmotes.length===8){
-    applyEmoteConfig(state.customEmotes.map(e=>({...e})));
-  }
-  // Apply host custom enemy emotes on guest side
-  if(state.customEnemyEmotes&&Array.isArray(state.customEnemyEmotes)&&state.customEnemyEmotes.length===8){
-    applyEnemyEmoteConfig(state.customEnemyEmotes.map(e=>({...e})));
-  }
+  // Each client keeps their own emote wheel — no longer overwrite from host
   // Apply overlay from host
   if(state.overlayImageSrc!==undefined){
     applyOverlay(state.overlayImageSrc);
@@ -1315,7 +1313,7 @@ function hasContinuousTokenAnimation(){
     || damageAnimations.size>0
     || performance.now()<screenShakeUntil
     || participants.some(p=>p.pingUntil&&p.pingUntil>now)
-    || participants.some(p=>isEmoteActive(p,now)&&isEmoteAnimated(p.emoteKey));
+    || participants.some(p=>isEmoteActive(p,now)&&(p.emoteAnimated||isEmoteAnimated(p.emoteKey)));
 }
 function checkAndStartAnimLoop(){if(hasContinuousTokenAnimation())startAnimLoop();}
 function startAnimLoop(){
@@ -1376,8 +1374,6 @@ function syncToServer(){
     latestDicePrompt:lastDicePrompt,
     bagItems:normalizeBagItems(bagItems),
     bagWeightMultipliers:normalizeBagWeightMultipliers(bagWeightMultipliers),
-    customEmotes:EMOTE_DATA,
-    customEnemyEmotes:ENEMY_EMOTE_DATA,
     overlayImageSrc:currentOverlaySrc||null});
 }
 
@@ -1561,17 +1557,18 @@ function drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn,activeAnimatedEmotes
   }
 
   if(isEmoteActive(p)){
-    const emoteMeta=getEmoteByKey(p.emoteKey);
-    if(emoteMeta?.animated){
-      if(syncAnimatedEmoteOverlay(p,px,py,pr,emoteMeta)){
+    const eSrc=p.emoteSrc||(getEmoteByKey(p.emoteKey)||{}).src;
+    const eAnimated=p.emoteAnimated!==undefined?p.emoteAnimated:!!(getEmoteByKey(p.emoteKey)||{}).animated;
+    const eScale=p.emoteScale||(getEmoteByKey(p.emoteKey)||{}).scale||1;
+    if(eAnimated&&eSrc){
+      if(syncAnimatedEmoteOverlay(p,px,py,pr,{src:eSrc,scale:eScale})){
         if(activeAnimatedEmotes)activeAnimatedEmotes.add(p.id);
         return;
       }
     }
     removeEmoteOverlayNode(p.id);
-    const emoteImg=getEmoteImage(p.emoteKey);
+    const emoteImg=getEmoteImageBySrc(p.emoteKey,eSrc);
     if(emoteImg&&emoteImg.complete&&emoteImg.naturalWidth){
-      const eScale=emoteMeta.scale||1;
       const edw=dw*eScale,edh=dh*eScale;
       drawImageCover(ctx,emoteImg,px-edw/2,py-edh/2,edw,edh);
       return;
@@ -2610,13 +2607,13 @@ function drawParticipants(){
     } else {
       // Check for active emote on enemy/non-player-sprite tokens
       if(isEmoteActive(p)){
-        const emoteMeta=getEmoteByKey(p.emoteKey);
-        if(emoteMeta&&emoteMeta.animated){
-          if(syncAnimatedEmoteOverlay(p,px,py,pr,emoteMeta)){
+        const eSrc=p.emoteSrc||(getEmoteByKey(p.emoteKey)||{}).src;
+        const eAnimated=p.emoteAnimated!==undefined?p.emoteAnimated:!!(getEmoteByKey(p.emoteKey)||{}).animated;
+        const eScale=p.emoteScale||(getEmoteByKey(p.emoteKey)||{}).scale||1;
+        if(eAnimated&&eSrc){
+          if(syncAnimatedEmoteOverlay(p,px,py,pr,{src:eSrc,scale:eScale})){
             if(activeAnimatedEmotes)activeAnimatedEmotes.add(p.id);
             ctx.restore();
-            // Skip normal drawing — emote overlay is shown
-            // Still draw labels below
             ctx.save();
             ctx.shadowBlur=0;
             ctx.font='bold 12px Source Sans 3, sans-serif';ctx.textAlign='center';
@@ -2631,9 +2628,8 @@ function drawParticipants(){
           }
         }
         removeEmoteOverlayNode(p.id);
-        const emoteImg=getEmoteImage(p.emoteKey);
+        const emoteImg=getEmoteImageBySrc(p.emoteKey,eSrc);
         if(emoteImg&&emoteImg.complete&&emoteImg.naturalWidth){
-          const eScale=emoteMeta?.scale||1;
           const dw=pr*2.08*eScale,dh=pr*2.08*eScale;
           drawImageCover(ctx,emoteImg,px-dw/2,py-dh/2,dw,dh);
           ctx.restore();
@@ -5401,6 +5397,11 @@ if(guestDiceRequestBtn){
           <input type="range" class="emote-slot-scale" data-idx="${i}" min="0.3" max="3" step="0.1" value="${slot.scale||1}" style="flex:1;height:14px;cursor:pointer">
           <span class="emote-slot-scale-val" data-idx="${i}" style="min-width:28px;text-align:right">${(slot.scale||1).toFixed(1)}x</span>
         </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <label style="white-space:nowrap">Duration:</label>
+          <input type="number" class="emote-slot-duration" data-idx="${i}" min="250" max="60000" step="250" value="${slot.durationMs||1000}" style="width:70px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:3px 6px;color:var(--text);font-size:11px;text-align:center">
+          <span style="opacity:.6">ms</span>
+        </div>
         <input type="file" class="emote-slot-file" data-idx="${i}" accept="image/*" style="display:none">
       `;
       grid.appendChild(card);
@@ -5449,7 +5450,9 @@ if(guestDiceRequestBtn){
       el.addEventListener('change',()=>{
         const idx=parseInt(el.dataset.idx);
         pendingSlots[idx].animated=el.checked;
-        pendingSlots[idx].durationMs=el.checked?4000:1000;
+        if(el.checked)pendingSlots[idx].durationMs=4000;
+        const durEl=grid.querySelector(`.emote-slot-duration[data-idx="${idx}"]`);
+        if(durEl)durEl.value=pendingSlots[idx].durationMs;
       });
     });
     grid.querySelectorAll('.emote-slot-scale').forEach(el=>{
@@ -5458,6 +5461,14 @@ if(guestDiceRequestBtn){
         const val=parseFloat(el.value)||1;
         pendingSlots[idx].scale=val;
         grid.querySelector(`.emote-slot-scale-val[data-idx="${idx}"]`).textContent=val.toFixed(1)+'x';
+      });
+    });
+    grid.querySelectorAll('.emote-slot-duration').forEach(el=>{
+      el.addEventListener('change',()=>{
+        const idx=parseInt(el.dataset.idx);
+        const val=Math.max(250,Math.min(60000,parseInt(el.value,10)||1000));
+        pendingSlots[idx].durationMs=val;
+        el.value=val;
       });
     });
     grid.querySelectorAll('.emote-slot-clear').forEach(el=>{
@@ -5474,6 +5485,7 @@ if(guestDiceRequestBtn){
         grid.querySelector(`.emote-slot-anim[data-idx="${idx}"]`).checked=def.animated;
         grid.querySelector(`.emote-slot-scale[data-idx="${idx}"]`).value=def.scale||1;
         grid.querySelector(`.emote-slot-scale-val[data-idx="${idx}"]`).textContent=(def.scale||1).toFixed(1)+'x';
+        grid.querySelector(`.emote-slot-duration[data-idx="${idx}"]`).value=def.durationMs||1000;
       });
     });
   }
@@ -5499,13 +5511,11 @@ if(guestDiceRequestBtn){
     saveCustomEmotes(pendingSlots);
     applyEmoteConfig(pendingSlots.map(e=>({...e})));
     closeModal();
-    if(isHost)syncToServer();
   });
 
   resetBtn.addEventListener('click',()=>{
     localStorage.removeItem('customEmoteConfig');
     applyEmoteConfig(DEFAULT_EMOTE_DATA.map(e=>({...e})));
-    if(isHost)syncToServer();
     closeModal();
   });
 })();
@@ -5547,6 +5557,11 @@ if(guestDiceRequestBtn){
           <label style="white-space:nowrap">Scale:</label>
           <input type="range" class="enemy-emote-slot-scale" data-idx="${i}" min="0.3" max="3" step="0.1" value="${slot.scale||1}" style="flex:1;height:14px;cursor:pointer">
           <span class="enemy-emote-slot-scale-val" data-idx="${i}" style="min-width:28px;text-align:right">${(slot.scale||1).toFixed(1)}x</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <label style="white-space:nowrap">Duration:</label>
+          <input type="number" class="enemy-emote-slot-duration" data-idx="${i}" min="250" max="60000" step="250" value="${slot.durationMs||1000}" style="width:70px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:3px 6px;color:var(--text);font-size:11px;text-align:center">
+          <span style="opacity:.6">ms</span>
         </div>
         <input type="file" class="enemy-emote-slot-file" data-idx="${i}" accept="image/*" style="display:none">
       `;
@@ -5593,7 +5608,9 @@ if(guestDiceRequestBtn){
       el.addEventListener('change',()=>{
         const idx=parseInt(el.dataset.idx);
         pendingSlots[idx].animated=el.checked;
-        pendingSlots[idx].durationMs=el.checked?4000:1000;
+        if(el.checked)pendingSlots[idx].durationMs=4000;
+        const durEl=grid.querySelector(`.enemy-emote-slot-duration[data-idx="${idx}"]`);
+        if(durEl)durEl.value=pendingSlots[idx].durationMs;
       });
     });
     grid.querySelectorAll('.enemy-emote-slot-scale').forEach(el=>{
@@ -5602,6 +5619,14 @@ if(guestDiceRequestBtn){
         const val=parseFloat(el.value)||1;
         pendingSlots[idx].scale=val;
         grid.querySelector(`.enemy-emote-slot-scale-val[data-idx="${idx}"]`).textContent=val.toFixed(1)+'x';
+      });
+    });
+    grid.querySelectorAll('.enemy-emote-slot-duration').forEach(el=>{
+      el.addEventListener('change',()=>{
+        const idx=parseInt(el.dataset.idx);
+        const val=Math.max(250,Math.min(60000,parseInt(el.value,10)||1000));
+        pendingSlots[idx].durationMs=val;
+        el.value=val;
       });
     });
     grid.querySelectorAll('.enemy-emote-slot-clear').forEach(el=>{
@@ -5618,6 +5643,7 @@ if(guestDiceRequestBtn){
         grid.querySelector(`.enemy-emote-slot-anim[data-idx="${idx}"]`).checked=def.animated;
         grid.querySelector(`.enemy-emote-slot-scale[data-idx="${idx}"]`).value=def.scale||1;
         grid.querySelector(`.enemy-emote-slot-scale-val[data-idx="${idx}"]`).textContent=(def.scale||1).toFixed(1)+'x';
+        grid.querySelector(`.enemy-emote-slot-duration[data-idx="${idx}"]`).value=def.durationMs||1000;
       });
     });
   }
@@ -5646,13 +5672,11 @@ if(guestDiceRequestBtn){
     saveCustomEnemyEmotes(pendingSlots);
     applyEnemyEmoteConfig(pendingSlots.map(e=>({...e})));
     closeModal();
-    if(isHost)syncToServer();
   });
 
   resetBtn.addEventListener('click',()=>{
     localStorage.removeItem('customEnemyEmoteConfig');
     applyEnemyEmoteConfig(DEFAULT_ENEMY_EMOTE_DATA.map(e=>({...e})));
-    if(isHost)syncToServer();
     closeModal();
   });
 })();

@@ -621,6 +621,102 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* ---- Difficulty Badge ---- */
+        .difficulty-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.18rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+        }
+        /* diff color tiers set dynamically via JS inline styles */
+
+        /* ---- Encounter Suggester Panel ---- */
+        .encounter-panel {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .encounter-panel h2 {
+            color: #fbbf24;
+            font-size: 1.4rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .encounter-controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 0.85rem;
+            margin-bottom: 1rem;
+        }
+        .encounter-results {
+            display: grid;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        .encounter-result-card {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 0.6rem;
+            padding: 1rem;
+        }
+        .encounter-result-card .enc-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.6rem;
+            color: #94a3b8;
+            font-size: 0.85rem;
+        }
+        .enc-total {
+            color: #fbbf24;
+            font-weight: 700;
+        }
+        .enc-enemy-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.35rem 0;
+            border-bottom: 1px solid #1e293b;
+            font-size: 0.9rem;
+        }
+        .enc-enemy-row:last-child { border-bottom: none; }
+        .enc-img {
+            width: 32px;
+            height: 32px;
+            border-radius: 0.35rem;
+            border: 1px solid #334155;
+            background: #1e293b center/cover no-repeat;
+            flex: 0 0 32px;
+        }
+        .enc-img.empty { display: grid; place-items: center; color: #475569; font-size: 0.5rem; }
+        .enc-name { flex: 1; color: #f1f5f9; font-weight: 600; }
+        .enc-count {
+            background: #334155;
+            color: #94a3b8;
+            border-radius: 0.3rem;
+            padding: 0.1rem 0.45rem;
+            font-size: 0.78rem;
+        }
+        .encounter-empty {
+            text-align: center;
+            color: #475569;
+            padding: 1.5rem;
+            font-size: 0.9rem;
+        }
+        .encounter-no-enemies {
+            color: #ef4444;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+        }
     </style>
 </head>
 
@@ -636,6 +732,7 @@
         <div class="wiki-switch">
             <button id="switchEnemiesBtn" class="btn btn-primary active" onclick="switchWikiSection('enemies')">⚔️ Enemies</button>
             <button id="switchItemsBtn" class="btn btn-secondary" onclick="switchWikiSection('items')">🎒 Items</button>
+            <button id="switchEncounterBtn" class="btn btn-secondary" onclick="switchWikiSection('encounter')">🎲 Encounter Suggester</button>
         </div>
 
         <div id="enemiesSection">
@@ -728,6 +825,10 @@
                     <div class="form-group">
                         <label>Color</label>
                         <input type="color" id="colorInput" value="#e05252">
+                    </div>
+                    <div class="form-group">
+                        <label style="color: #fb923c;">⚡ Difficulty Score</label>
+                        <input type="number" id="difficultyInput" min="0" step="0.5" placeholder="e.g. 0.5, 3, 12.5…" style="width:100%">
                     </div>
                     <div class="form-group">
                         <label style="color: #fbbf24;">Sprite / Image</label>
@@ -888,7 +989,50 @@
             </div>
         </div>
 
-    </div>
+    </div><!-- /itemsSection -->
+
+        <!-- ENCOUNTER SUGGESTER SECTION -->
+        <div id="encounterSection" class="hidden">
+            <div class="encounter-panel">
+                <h2>🎲 Encounter Suggester</h2>
+                <p style="color:#94a3b8;margin-bottom:1.2rem;font-size:0.92rem;">Generate random encounter groups based on difficulty. Enemies can appear multiple times.</p>
+
+                <div class="encounter-controls">
+                    <div class="form-group">
+                        <label style="color:#fbbf24;">Target Difficulty</label>
+                        <input type="number" id="encTargetDifficulty" min="0" step="0.5" value="15" placeholder="e.g. 15">
+                    </div>
+                    <div class="form-group">
+                        <label style="color:#fb923c;">Tolerance (±)</label>
+                        <input type="number" id="encTolerance" min="0" step="0.5" value="3" placeholder="e.g. 3">
+                    </div>
+                    <div class="form-group">
+                        <label style="color:#10b981;">Location Filter</label>
+                        <select id="encLocationFilter">
+                            <option value="">Any Location</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label style="color:#a78bfa;">Results to Show</label>
+                        <input type="number" id="encResultCount" min="1" max="10" value="3" placeholder="e.g. 3">
+                    </div>
+                    <div class="form-group">
+                        <label style="color:#94a3b8;">Max Enemies per Group</label>
+                        <input type="number" id="encMaxEnemies" min="1" max="20" value="6" placeholder="e.g. 6">
+                    </div>
+                </div>
+
+                <div id="encNoEnemiesWarning" class="encounter-no-enemies hidden">⚠️ No enemies with a difficulty score set. Edit your enemies and assign a difficulty score to use this feature.</div>
+
+                <button class="btn btn-primary" onclick="generateEncounters()" style="margin-top:0.25rem;">
+                    🎲 Suggest Encounters
+                </button>
+
+                <div id="encounterResults" class="encounter-results"></div>
+            </div>
+        </div>
+
+    </div><!-- /container -->
 
     <script>
         // -------------------- Enemies --------------------
@@ -981,28 +1125,37 @@
         }
 
         function switchWikiSection(section) {
-            const enemies = document.getElementById('enemiesSection');
+            const enemiesSection = document.getElementById('enemiesSection');
             const itemsSection = document.getElementById('itemsSection');
+            const encounterSection = document.getElementById('encounterSection');
             const bEnemies = document.getElementById('switchEnemiesBtn');
             const bItems = document.getElementById('switchItemsBtn');
+            const bEncounter = document.getElementById('switchEncounterBtn');
+
+            // Hide all
+            enemiesSection.classList.add('hidden');
+            itemsSection.classList.add('hidden');
+            encounterSection.classList.add('hidden');
+
+            // Reset all buttons
+            [bEnemies, bItems, bEncounter].forEach(b => {
+                b.classList.remove('active', 'btn-primary');
+                b.classList.add('btn-secondary');
+            });
+
             if (section === 'items') {
-                enemies.classList.add('hidden');
                 itemsSection.classList.remove('hidden');
-                bEnemies.classList.remove('active');
-                bEnemies.classList.remove('btn-primary');
-                bEnemies.classList.add('btn-secondary');
-                bItems.classList.add('active');
+                bItems.classList.add('active', 'btn-primary');
                 bItems.classList.remove('btn-secondary');
-                bItems.classList.add('btn-primary');
+            } else if (section === 'encounter') {
+                encounterSection.classList.remove('hidden');
+                bEncounter.classList.add('active', 'btn-primary');
+                bEncounter.classList.remove('btn-secondary');
+                updateEncounterLocationFilter();
             } else {
-                itemsSection.classList.add('hidden');
-                enemies.classList.remove('hidden');
-                bItems.classList.remove('active');
-                bItems.classList.remove('btn-primary');
-                bItems.classList.add('btn-secondary');
-                bEnemies.classList.add('active');
+                enemiesSection.classList.remove('hidden');
+                bEnemies.classList.add('active', 'btn-primary');
                 bEnemies.classList.remove('btn-secondary');
-                bEnemies.classList.add('btn-primary');
             }
         }
 
@@ -1010,6 +1163,38 @@
             document.getElementById('listView').classList.add('hidden');
             document.getElementById('formView').classList.add('hidden');
             document.getElementById('detailView').classList.add('hidden');
+        }
+
+        // -------------------- Difficulty Badge --------------------
+        function getDifficultyColor(d) {
+            // Smooth HSL gradient: green (low) → yellow → orange → red → purple (high)
+            // Normalise to a 0-1 scale using a soft cap around 20 for colour saturation
+            const t = Math.min(d / 20, 1);
+            if (t <= 0) return { bg: '#1e293b44', color: '#94a3b8', border: '#334155' };
+            if (t < 0.25) {
+                // green → yellow-green
+                const h = Math.round(120 - t * 4 * 40); // 120 → 80
+                return { bg: `hsla(${h},60%,30%,0.18)`, color: `hsl(${h},80%,65%)`, border: `hsl(${h},60%,35%)` };
+            } else if (t < 0.5) {
+                const h = Math.round(80 - (t - 0.25) * 4 * 50); // 80 → 30
+                return { bg: `hsla(${h},70%,28%,0.18)`, color: `hsl(${h},90%,60%)`, border: `hsl(${h},70%,35%)` };
+            } else if (t < 0.75) {
+                const h = Math.round(30 - (t - 0.5) * 4 * 30); // 30 → 0
+                return { bg: `hsla(${h},80%,25%,0.18)`, color: `hsl(${h},90%,62%)`, border: `hsl(${h},80%,35%)` };
+            } else {
+                const frac = (t - 0.75) * 4; // 0→1 into purple
+                const h = Math.round(360 - frac * 90); // 360(red) → 270(purple)
+                return { bg: `hsla(${h},70%,22%,0.18)`, color: `hsl(${h},80%,70%)`, border: `hsl(${h},60%,35%)` };
+            }
+        }
+
+        function getDifficultyBadge(difficulty) {
+            if (difficulty === null || difficulty === undefined || difficulty === '') return '';
+            const d = Number(difficulty);
+            if (isNaN(d)) return '';
+            const { bg, color, border } = getDifficultyColor(d);
+            const display = Number.isInteger(d) ? d : d;
+            return `<span class="difficulty-badge" style="background:${bg};color:${color};border:1px solid ${border}" title="Difficulty ${d}">⚡ ${display}</span>`;
         }
 
         // -------------------- Enemies UI --------------------
@@ -1042,6 +1227,7 @@
                                             ${enemy.locations.map(loc => `<span class="location-tag">📍 ${escapeHtml(loc)}</span>`).join('')}
                                         </div>
                                     ` : ''}
+                                    ${(enemy.difficulty !== null && enemy.difficulty !== undefined && enemy.difficulty !== '') ? `<div style="margin-top:0.4rem">${getDifficultyBadge(enemy.difficulty)}</div>` : ''}
                                 </div>
                             </div>
                             <div class="enemy-actions">
@@ -1135,6 +1321,9 @@
 
             dropSelect.innerHTML = '<option value="">All Drops</option>' +
                 drops.map(drop => `<option value="${escapeHtml(drop)}">${escapeHtml(drop)}</option>`).join('');
+
+            // Also sync encounter location filter
+            updateEncounterLocationFilter();
         }
 
         function filterEnemies() {
@@ -1236,6 +1425,7 @@
             document.getElementById('acInput').value = enemy.ac || '';
             document.getElementById('speedInput').value = enemy.speed || '';
             document.getElementById('colorInput').value = enemy.color || '#e05252';
+            document.getElementById('difficultyInput').value = (enemy.difficulty !== null && enemy.difficulty !== undefined) ? enemy.difficulty : '';
             document.getElementById('dropsInput').value = enemy.drops || '';
             document.getElementById('attacksInput').value = enemy.attacks || '';
             document.getElementById('weaknessesInput').value = enemy.weaknesses || '';
@@ -1271,6 +1461,7 @@
                 ac: document.getElementById('acInput').value.trim(),
                 speed: document.getElementById('speedInput').value.trim(),
                 color: document.getElementById('colorInput').value,
+                difficulty: document.getElementById('difficultyInput').value !== '' ? Number(document.getElementById('difficultyInput').value) : null,
                 image: currentEnemyImage || '',
                 drops: document.getElementById('dropsInput').value.trim(),
                 attacks: document.getElementById('attacksInput').value.trim(),
@@ -1322,6 +1513,7 @@
             document.getElementById('acInput').value = '';
             document.getElementById('speedInput').value = '';
             document.getElementById('colorInput').value = '#e05252';
+            document.getElementById('difficultyInput').value = '';
             document.getElementById('dropsInput').value = '';
             document.getElementById('attacksInput').value = '';
             document.getElementById('weaknessesInput').value = '';
@@ -1425,6 +1617,7 @@
                                 <h3 class="enemy-title">${escapeHtml(enemy.name)}</h3>
                                 <p class="enemy-type">${enemy.size ? escapeHtml(enemy.size) + ' ' : ''}${escapeHtml(enemy.type || '')}</p>
                                 ${locsHtml}
+                                ${(enemy.difficulty !== null && enemy.difficulty !== undefined && enemy.difficulty !== '') ? `<div style="margin-top:0.4rem">${getDifficultyBadge(enemy.difficulty)}</div>` : ''}
                             </div>
                         </div>
                         <div class="enemy-actions">
@@ -1643,7 +1836,119 @@
             event.dataTransfer.setData('text/plain', item.name || 'Item');
         }
 
-        // Initialize
+        // -------------------- Encounter Suggester --------------------
+        function updateEncounterLocationFilter() {
+            const locations = [...new Set(enemies.flatMap(e => e.locations || []))].sort();
+            const sel = document.getElementById('encLocationFilter');
+            const current = sel.value;
+            sel.innerHTML = '<option value="">Any Location</option>' +
+                locations.map(loc => `<option value="${escapeHtml(loc)}"${current === loc ? ' selected' : ''}>${escapeHtml(loc)}</option>`).join('');
+        }
+
+        function generateEncounters() {
+            const target = parseFloat(document.getElementById('encTargetDifficulty').value) || 15;
+            const tolerance = parseFloat(document.getElementById('encTolerance').value) ?? 3;
+            const location = document.getElementById('encLocationFilter').value;
+            const resultCount = Math.max(1, Math.min(10, parseInt(document.getElementById('encResultCount').value) || 3));
+            const maxEnemies = Math.max(1, Math.min(20, parseInt(document.getElementById('encMaxEnemies').value) || 6));
+
+            const minTotal = target - tolerance;
+            const maxTotal = target + tolerance;
+
+            // Pool: enemies with a numeric difficulty score >= 0, filtered by location
+            let pool = enemies.filter(e => {
+                const hasDiff = e.difficulty !== null && e.difficulty !== undefined && e.difficulty !== '' && !isNaN(Number(e.difficulty)) && Number(e.difficulty) > 0;
+                const matchLoc = !location || (e.locations && e.locations.includes(location));
+                return hasDiff && matchLoc;
+            });
+
+            const warning = document.getElementById('encNoEnemiesWarning');
+            const resultsDiv = document.getElementById('encounterResults');
+
+            if (pool.length === 0) {
+                warning.classList.remove('hidden');
+                resultsDiv.innerHTML = '';
+                return;
+            }
+            warning.classList.add('hidden');
+
+            // Try to generate `resultCount` distinct valid encounters via random sampling
+            const results = [];
+            const seen = new Set();
+            const maxAttempts = 2000;
+            let attempts = 0;
+
+            while (results.length < resultCount && attempts < maxAttempts) {
+                attempts++;
+                const group = buildRandomGroup(pool, minTotal, maxTotal, maxEnemies);
+                if (!group) continue;
+
+                // Deduplicate by sorted name signature
+                const sig = group.map(e => e.name).sort().join('|');
+                if (seen.has(sig)) continue;
+                seen.add(sig);
+                results.push(group);
+            }
+
+            if (results.length === 0) {
+                resultsDiv.innerHTML = `<div class="encounter-empty">😕 No valid encounter found within difficulty ${minTotal}–${maxTotal} with max ${maxEnemies} enemies. Try widening the tolerance or increasing max enemies.</div>`;
+                return;
+            }
+
+            resultsDiv.innerHTML = results.map((group, i) => {
+                // Aggregate duplicates
+                const counts = {};
+                group.forEach(e => { counts[e.name] = (counts[e.name] || { enemy: e, count: 0 }); counts[e.name].count++; });
+                const total = group.reduce((s, e) => s + Number(e.difficulty), 0);
+
+                const rows = Object.values(counts).map(({ enemy, count }) => {
+                    const img = getEnemyImage(enemy);
+                    const imgHtml = img
+                        ? `<div class="enc-img" style="background-image:url('${escapeHtml(img)}')"></div>`
+                        : `<div class="enc-img empty">?</div>`;
+                    const locs = enemy.locations && enemy.locations.length ? enemy.locations.join(', ') : '—';
+                    const diffBadge = getDifficultyBadge(enemy.difficulty);
+                    return `<div class="enc-enemy-row">
+                        ${imgHtml}
+                        <span class="enc-name">${escapeHtml(enemy.name)}</span>
+                        ${diffBadge}
+                        <span style="color:#94a3b8;font-size:0.78rem">📍 ${escapeHtml(locs)}</span>
+                        ${count > 1 ? `<span class="enc-count">×${count}</span>` : ''}
+                    </div>`;
+                }).join('');
+
+                return `<div class="encounter-result-card">
+                    <div class="enc-header">
+                        <span>Encounter ${i + 1}</span>
+                        <span>Total difficulty: <span class="enc-total">${total}</span></span>
+                    </div>
+                    ${rows}
+                </div>`;
+            }).join('');
+        }
+
+        function buildRandomGroup(pool, minTotal, maxTotal, maxEnemies) {
+            // Shuffle pool
+            const shuffled = [...pool].sort(() => Math.random() - 0.5);
+            const group = [];
+            let total = 0;
+
+            // We build greedily by randomly adding enemies; backtrack if overshoot
+            for (let i = 0; i < maxEnemies; i++) {
+                const remaining = maxTotal - total;
+                const candidates = pool.filter(e => Number(e.difficulty) <= remaining);
+                if (candidates.length === 0) break;
+                const pick = candidates[Math.floor(Math.random() * candidates.length)];
+                group.push(pick);
+                total += Number(pick.difficulty);
+                if (total >= minTotal) break; // Early exit if within range
+            }
+
+            if (total >= minTotal && total <= maxTotal) return group;
+            return null;
+        }
+
+        // -------------------- Initialize --------------------
         loadEnemies();
         loadItems();
         document.getElementById('itemSearchInput').addEventListener('input', renderItems);

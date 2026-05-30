@@ -144,6 +144,9 @@ function maskStateForGuest(room, guestName) {
       pingUntil: p.pingUntil || null,
       emoteKey: p.emoteKey || null,
       emoteUntil: p.emoteUntil || null,
+      emoteSrc: p.emoteSrc || null,
+      emoteAnimated: !!p.emoteAnimated,
+      emoteScale: p.emoteScale || 1,
       ownerId: p.ownerId || null,
       name: p.ownerId ? p.name : undefined,
     })),
@@ -455,16 +458,19 @@ wss.on('connection', ws => {
           return;
         }
 
-        const key = String(msg.emoteKey || '').trim().toLowerCase();
+        const key = String(msg.emoteKey || '').trim();
         if (!key) {
           ws.send(JSON.stringify({ type: 'guest_emote_result', ok: false, reason: 'bad_emote_key' }));
           return;
         }
 
         const durationRaw = Number.parseInt(msg.durationMs, 10);
-        const durationMs = Number.isNaN(durationRaw) ? 1000 : Math.max(250, Math.min(10000, durationRaw));
+        const durationMs = Number.isNaN(durationRaw) ? 1000 : Math.max(250, Math.min(60000, durationRaw));
         const loopsUntilInterrupt = !!msg.loop;
         p.emoteKey = key;
+        p.emoteSrc = msg.emoteSrc || null;
+        p.emoteAnimated = !!msg.emoteAnimated;
+        p.emoteScale = Number(msg.emoteScale) || 1;
         p.emoteUntil = loopsUntilInterrupt ? null : (Date.now() + durationMs);
 
         broadcastGuestState(room);
@@ -486,6 +492,9 @@ wss.on('connection', ws => {
 
         p.emoteKey = null;
         p.emoteUntil = null;
+        p.emoteSrc = null;
+        p.emoteAnimated = false;
+        p.emoteScale = 1;
         broadcastGuestState(room);
         sendToHost(room, { type: 'state_echo', state: room.state });
         ws.send(JSON.stringify({ type: 'guest_emote_result', ok: true }));
@@ -623,6 +632,9 @@ wss.on('connection', ws => {
           p.movedUnits = movedSoFar + distUnits;
           p.emoteKey = null;
           p.emoteUntil = null;
+          p.emoteSrc = null;
+          p.emoteAnimated = false;
+          p.emoteScale = 1;
           broadcastGuestState(room);
           sendToHost(room, { type: 'state_echo', state: room.state });
           ws.send(JSON.stringify({ type: 'request_result', ok: true, autoApproved: true, reason: room.state.guestDiceThrowEnabled ? 'guest_dice_throw_enabled' : 'tolerance', newPos: { x: p.x, y: p.y } }));
@@ -675,6 +687,9 @@ wss.on('connection', ws => {
             p.movedUnits = (p.movedUnits || 0) + req.distUnits;
             p.emoteKey = null;
             p.emoteUntil = null;
+            p.emoteSrc = null;
+            p.emoteAnimated = false;
+            p.emoteScale = 1;
           }
           broadcastGuestState(room);
           sendToHost(room, { type: 'state_echo', state: room.state });

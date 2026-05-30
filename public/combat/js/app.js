@@ -381,6 +381,13 @@ function ensureParticipantChargeFields(p){
   p.chargesTurnStartAdd=clampChargeGain(p.chargesTurnStartAdd);
   p.chargesTurnEndAdd=clampChargeGain(p.chargesTurnEndAdd);
   if(p.emoteKey===undefined)p.emoteKey=null;
+  // Convert relative duration from relay to local absolute timestamp
+  if(p.emoteDurationRemaining!==undefined){
+    if(p.emoteDurationRemaining===null) p.emoteUntil=null;
+    else if(p.emoteDurationRemaining<=0){ p.emoteUntil=0; }
+    else p.emoteUntil=Date.now()+p.emoteDurationRemaining;
+    delete p.emoteDurationRemaining;
+  }
   if(p.emoteUntil===undefined)p.emoteUntil=null;
   return p;
 }
@@ -813,6 +820,60 @@ function rollPromptedDice(expr, promptId){
   requestDiceRoll(expr, { prompted: true, promptId });
 }
 
+/* ── DICE RESULT POPUP + HISTORY ── */
+let _dicePopupTimer=null;
+function showDiceResultPopup(detail){
+  const total=detail.total??detail.result??'';
+  const expression=detail.expression||'';
+  const thrower=detail.thrower||detail.fromGuestName||'';
+  const results=Array.isArray(detail.results)?detail.results:[];
+  const mod=detail.mod||0;
+  const parts=results.map(r=>`${(r.sign||1)<0?'−':''}${r.value}`);
+  if(mod!==0)parts.push((mod>0?'+':'')+mod);
+  const breakdown=parts.join(' + ').replace(/\+ −/g,'− ');
+
+  // Popup banner
+  const popup=document.getElementById('diceResultPopup');
+  if(popup){
+    popup.querySelector('.drp-thrower').textContent=thrower?`🎲 ${thrower}`:'\u200B';
+    popup.querySelector('.drp-total').textContent=total;
+    popup.querySelector('.drp-breakdown').textContent=breakdown||'';
+    popup.querySelector('.drp-expr').textContent=expression?`(${expression})`:'';
+    popup.classList.add('visible');
+    if(_dicePopupTimer)clearTimeout(_dicePopupTimer);
+    _dicePopupTimer=setTimeout(()=>{popup.classList.remove('visible');_dicePopupTimer=null;},4000);
+  }
+
+  // History log
+  addDiceHistoryEntry(thrower, total, breakdown, expression);
+}
+
+function addDiceHistoryEntry(thrower, total, breakdown, expression){
+  const now=new Date();
+  const timeStr=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  const html=`<div class="dice-history-entry">
+    <span class="dhe-thrower">${escHtml(thrower||'?')}</span>
+    <span class="dhe-total">${escHtml(String(total))}</span>
+    <span class="dhe-detail">${escHtml(expression||'')} ${breakdown?'= '+escHtml(breakdown):''}</span>
+    <span class="dhe-time">${timeStr}</span>
+  </div>`;
+  const hostLog=document.getElementById('diceHistoryLog');
+  const guestLog=document.getElementById('guestDiceHistoryLog');
+  if(hostLog){hostLog.insertAdjacentHTML('afterbegin',html);if(hostLog.children.length>50)hostLog.lastElementChild.remove();}
+  if(guestLog){guestLog.insertAdjacentHTML('afterbegin',html);if(guestLog.children.length>50)guestLog.lastElementChild.remove();}
+}
+
+// Listen for local dice results (host's own rolls settle in dice-physics.js)
+document.addEventListener('dice-result',e=>{
+  if(e.detail)showDiceResultPopup(e.detail);
+});
+
+// Clear history button
+document.getElementById('diceHistoryClear')?.addEventListener('click',()=>{
+  const h=document.getElementById('diceHistoryLog');if(h)h.innerHTML='';
+  const g=document.getElementById('guestDiceHistoryLog');if(g)g.innerHTML='';
+});
+
 function showDicePrompt(expr, promptId){
   if(isHost) return;
   const normalized=String(expr||'1d20').trim()||'1d20';
@@ -932,9 +993,9 @@ function approvePendingRequest(req, approve) {
       const payload = makeSharedRollPayload(req);
       activeDiceRequestId = payload.requestId;
 
-      // If host dice are still marked as rolling, reset first so this approval
-      // cannot silently no-op due to the roller's early-return guard.
-      if (window.combatDice?._rolling) {
+      // If host dice are still marked as rolling and this is NOT a throw,
+      // reset first so this approval cannot silently no-op.
+      if (window.combatDice?._rolling && !payload.throwData) {
         window.clearCombatDice?.();
       }
 
@@ -1044,6 +1105,8 @@ function handleMessage(msg) {
     const s=document.getElementById('diceResult');
     const statusRequestId=msg.requestId||msg.id||null;
     const matchesActive=!statusRequestId||!activeDiceRequestId||statusRequestId===activeDiceRequestId;
+    // If dice are already rolling, ignore stale denied messages
+    const currentlyRolling=window.combatDice?._rolling;
     console.info('[combat] guest received dice_request_status',{
       statusRequestId,
       activeDiceRequestId,
@@ -1056,6 +1119,8 @@ function handleMessage(msg) {
       const g=document.getElementById('guestDiceStatus');
       if(matchesActive&&g){g.textContent='🎲 Approved — rolling…';g.style.color='var(--accent2)';}
     }else if(msg.approved===false){
+      // Ignore stale denial if dice are already rolling (request was approved via another path)
+      if(currentlyRolling){console.info('[combat] ignoring stale denial — dice already rolling');return;}
       if(matchesActive&&s){s.className='';s.textContent='❌ Dice request denied.';}
       const g=document.getElementById('guestDiceStatus');
       if(matchesActive&&g){g.textContent='❌ Dice request denied.';g.style.color='var(--danger)';}
@@ -1065,6 +1130,14 @@ function handleMessage(msg) {
   }
   if (msg.type==='dice_roll_start'){
     if(isHost&&msg.source==='host')return;
+    // Roll start implies the request was approved — clear active request so new throws aren't blocked
+    if(!isHost && activeDiceRequestId){
+      activeDiceRequestId=null;
+      const s=document.getElementById('diceResult');
+      if(s){s.className='rolling';s.textContent='🎲 Rolling…';}
+      const g=document.getElementById('guestDiceStatus');
+      if(g){g.textContent='🎲 Rolling…';g.style.color='var(--accent2)';}
+    }
     combatDice.startSharedRoll(msg);
     return;
   }
@@ -1075,6 +1148,7 @@ function handleMessage(msg) {
   }
 if (msg.type === 'dice_roll_result') {
   combatDice.applySharedResult(msg);
+  showDiceResultPopup(msg);
 
   const s = document.getElementById('diceResult');
 
@@ -5337,7 +5411,7 @@ if(rollForAllGuestsBtn){
   if(!isHost)rollForAllGuestsBtn.style.display='none';
   rollForAllGuestsBtn.addEventListener('click',()=>{
     if(!isHost)return;
-    const expr=(document.getElementById('diceExpr').value||'').trim()||'1d20';
+    const expr=(document.getElementById('hostDiceExpr')?.value||document.getElementById('diceExpr')?.value||'').trim()||'1d20';
     if(!connectedGuests.length){showAlert('No guests are connected.');return;}
     lastDicePrompt={id:makeDiceRequestId(),expression:expr,createdAt:Date.now()};
     window.__broadcastAppMessage?.({type:'dice_roll_prompt',expression:expr,id:lastDicePrompt.id,source:'host',prompt:lastDicePrompt});
@@ -5354,9 +5428,30 @@ document.getElementById('clearDiceBtn').addEventListener('click',()=>{
     window.clearCombatDice?.();
   }
 });
+document.getElementById('clearAllDiceBtn')?.addEventListener('click',()=>{
+  if(window.__isHost){
+    window.clearCombatDice?.({broadcast:true});
+  }else{
+    window.clearCombatDice?.();
+  }
+});
 const guestDiceRequestBtn=document.getElementById('guestRequestDice');
 if(guestDiceRequestBtn){
   guestDiceRequestBtn.addEventListener('click',()=>requestDiceRoll(document.getElementById('guestDiceExpr')?.value||document.getElementById('diceExpr').value||'1d20'));
+}
+// Host dice roller in Dice Studio tab
+const hostRollBtn=document.getElementById('hostRollDiceBtn');
+if(hostRollBtn){
+  hostRollBtn.addEventListener('click',()=>{
+    const expr=(document.getElementById('hostDiceExpr')?.value||'').trim()||'1d20';
+    requestDiceRoll(expr);
+  });
+}
+const hostDiceExprEl=document.getElementById('hostDiceExpr');
+if(hostDiceExprEl){
+  hostDiceExprEl.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){const expr=e.target.value.trim()||'1d20';requestDiceRoll(expr);}
+  });
 }
 
 /* ================================================================

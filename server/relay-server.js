@@ -123,6 +123,7 @@ function roomSnapshot(room) {
 
 function maskStateForGuest(room, guestName) {
   const current = room.state.participants[room.state.turnIndex];
+  const now = Date.now();
   return {
     participants: room.state.participants.map(p => ({
       id: p.id,
@@ -143,7 +144,7 @@ function maskStateForGuest(room, guestName) {
       assignedTo: p.assignedTo || null,
       pingUntil: p.pingUntil || null,
       emoteKey: p.emoteKey || null,
-      emoteUntil: p.emoteUntil || null,
+      emoteDurationRemaining: (p.emoteUntil && p.emoteUntil > now) ? (p.emoteUntil - now) : (p.emoteUntil === null ? null : 0),
       emoteSrc: p.emoteSrc || null,
       emoteAnimated: !!p.emoteAnimated,
       emoteScale: p.emoteScale || 1,
@@ -187,6 +188,17 @@ function broadcastGuestState(room) {
 
 function sendToHost(room, msg) {
   if (room.hostSocket && room.hostSocket.readyState === WebSocket.OPEN) {
+    // Convert absolute emoteUntil to relative duration for clock-skew safety
+    if (msg.type === 'state_echo' && msg.state && Array.isArray(msg.state.participants)) {
+      const now = Date.now();
+      const converted = { ...msg, state: { ...msg.state, participants: msg.state.participants.map(p => {
+        if (p.emoteUntil === null || p.emoteUntil === undefined) return { ...p, emoteDurationRemaining: p.emoteUntil === null ? null : undefined, emoteUntil: undefined };
+        const remaining = p.emoteUntil - now;
+        return { ...p, emoteDurationRemaining: remaining > 0 ? remaining : 0, emoteUntil: undefined };
+      })}};
+      room.hostSocket.send(JSON.stringify(converted));
+      return;
+    }
     room.hostSocket.send(JSON.stringify(msg));
   }
 }

@@ -5499,6 +5499,8 @@ if(guestDiceRequestBtn){
   }
 
   openBtn.addEventListener('click',openModal);
+  const floatingBtn=document.getElementById('floatingEmoteSettingsBtn');
+  if(floatingBtn)floatingBtn.addEventListener('click',openModal);
   closeBtn.addEventListener('click',closeModal);
   modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});
 

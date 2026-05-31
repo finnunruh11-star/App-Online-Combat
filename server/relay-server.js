@@ -62,12 +62,16 @@ function defaultGameState() {
     guestInitiativeEnabled: false,
     guestDiceEnabled: false,
     guestDiceThrowEnabled: false,
+    guestFreeMoveEnabled: false,
     initiativeDisplayOrder: 'initiative',
     diceSettings: defaultDiceSettings(),
     diceState: null,
     latestDicePrompt: null,
     bagItems: [],
     bagWeightMultipliers: { fin: 0, nad: 0, kat: 0 },
+    backgroundImageSrc: '',
+    backgroundFillMode: 'stretch',
+    overlayImageSrc: null,
   };
 }
 
@@ -150,6 +154,7 @@ function maskStateForGuest(room, guestName) {
       emoteScale: p.emoteScale || 1,
       ownerId: p.ownerId || null,
       name: p.ownerId ? p.name : undefined,
+      avatar: p.avatar || p.portrait || p.sprite || p.image || null,
     })),
     objects: room.state.objects,
     turnIndex: room.state.turnIndex,
@@ -161,6 +166,7 @@ function maskStateForGuest(room, guestName) {
     guestInitiativeEnabled: room.state.guestInitiativeEnabled,
     guestDiceEnabled: room.state.guestDiceEnabled,
     guestDiceThrowEnabled: room.state.guestDiceThrowEnabled,
+    guestFreeMoveEnabled: room.state.guestFreeMoveEnabled,
     initiativeDisplayOrder: room.state.initiativeDisplayOrder,
     diceSettings: room.state.diceSettings,
     latestDicePrompt: room.state.latestDicePrompt,
@@ -171,6 +177,9 @@ function maskStateForGuest(room, guestName) {
     customEnemyEmotes: room.state.customEnemyEmotes || null,
     roomCode: room.code,
     guestName: guestName || null,
+    backgroundImageSrc: room.state.backgroundImageSrc || '',
+    backgroundFillMode: room.state.backgroundFillMode || 'stretch',
+    overlayImageSrc: room.state.overlayImageSrc || null,
   };
 }
 
@@ -225,9 +234,10 @@ function updateStateFromHost(room, msg) {
   const keys = [
     'participants', 'objects', 'turnIndex', 'canvasWidth', 'canvasHeight', 'pixelsPerUnit',
     'moveToleranceUnits', 'autoApproveIfWithinTolerance', 'guestDrawEnabled', 'guestInitiativeEnabled',
-    'guestDiceEnabled', 'guestDiceThrowEnabled', 'initiativeDisplayOrder', 'diceSettings',
+    'guestDiceEnabled', 'guestDiceThrowEnabled', 'guestFreeMoveEnabled', 'initiativeDisplayOrder', 'diceSettings',
     'diceState', 'latestDicePrompt', 'bagItems', 'bagWeightMultipliers',
     'customEmotes', 'customEnemyEmotes',
+    'backgroundImageSrc', 'backgroundFillMode', 'overlayImageSrc',
   ];
   for (const key of keys) {
     if (src[key] !== undefined) room.state[key] = deepClone(src[key]);
@@ -638,7 +648,7 @@ wss.on('connection', ws => {
         const remaining = Math.max(0, (p.speed || 0) - movedSoFar);
         const allowedThisMove = remaining + extraUnits;
 
-        if ((room.state.autoApproveIfWithinTolerance && distUnits <= allowedThisMove + room.state.moveToleranceUnits) || room.state.guestDiceThrowEnabled) {
+        if ((room.state.autoApproveIfWithinTolerance && distUnits <= allowedThisMove + room.state.moveToleranceUnits) || room.state.guestFreeMoveEnabled) {
           p.x = msg.target.x;
           p.y = msg.target.y;
           p.movedUnits = movedSoFar + distUnits;
@@ -649,7 +659,7 @@ wss.on('connection', ws => {
           p.emoteScale = 1;
           broadcastGuestState(room);
           sendToHost(room, { type: 'state_echo', state: room.state });
-          ws.send(JSON.stringify({ type: 'request_result', ok: true, autoApproved: true, reason: room.state.guestDiceThrowEnabled ? 'guest_dice_throw_enabled' : 'tolerance', newPos: { x: p.x, y: p.y } }));
+          ws.send(JSON.stringify({ type: 'request_result', ok: true, autoApproved: true, reason: room.state.guestFreeMoveEnabled ? 'guest_free_move_enabled' : 'tolerance', newPos: { x: p.x, y: p.y } }));
           return;
         }
 

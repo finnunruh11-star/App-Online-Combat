@@ -203,7 +203,7 @@ let pendingInitiativeUpdate = false;
 ================================================================ */
 let participants=[], objects=[], turnIndex=0, pixelsPerUnit=20;
 let backgroundImageSrc='', backgroundFillMode='stretch', backgroundImageEl=null;
-let guestDrawEnabled=false, guestInitiativeEnabled=false, guestDiceEnabled=false, guestDiceThrowEnabled=false;
+let guestDrawEnabled=false, guestInitiativeEnabled=false, guestDiceEnabled=false, guestDiceThrowEnabled=false, guestFreeMoveEnabled=false;
 let initiativeDisplayOrder='initiative'; // 'initiative' | 'alpha'
 let roundNumber=0;
 let bagItems=[];
@@ -277,6 +277,22 @@ const selectedObjectLabel=document.getElementById('selectedObjectLabel'), delete
 const backgroundUploadEl=document.getElementById('backgroundUpload'), backgroundFillModeEl=document.getElementById('backgroundFillMode'), clearBackgroundBtn=document.getElementById('clearBackground');
 const imageUpload=document.getElementById('imageUpload'), guestDrawToggle=document.getElementById('guestDrawToggle');
 const guestDiceToggle=document.getElementById('guestDiceToggle'), guestDiceThrowToggle=document.getElementById('guestDiceThrowToggle');
+// Inject the free-move toggle adjacent to the dice-throw toggle in the host settings panel.
+// Done here so the const below can find it via getElementById like all other toggles.
+(() => {
+  const ref = document.getElementById('guestDiceThrowToggle');
+  if (ref && !document.getElementById('guestFreeMoveToggle')) {
+    const container = ref.closest('label') || ref.parentElement;
+    if (container) {
+      const label = document.createElement('label');
+      label.className = container.className || '';
+      label.title = 'Allow guests to move tokens beyond their speed limit without DM approval';
+      label.innerHTML = '<input type="checkbox" id="guestFreeMoveToggle"> Guests move freely (no speed limit)';
+      container.insertAdjacentElement('afterend', label);
+    }
+  }
+})();
+const guestFreeMoveToggle = document.getElementById('guestFreeMoveToggle');
 const guestInitiativeToggle=document.getElementById('guestInitiativeToggle');
 const manualCircleUnitsEl=document.getElementById('manualCircleUnits'), showManualCircleBtn=document.getElementById('showManualCircle');
 const newPortraitPreview=document.getElementById('newPortraitPreview'), newPortraitBtn=document.getElementById('newPortraitBtn'), clearNewPortraitBtn=document.getElementById('clearNewPortrait'), newPortraitFile=document.getElementById('newPortraitFile');
@@ -1281,6 +1297,7 @@ function applyHostState(state) {
   if(state.guestDrawEnabled!==undefined){guestDrawEnabled=state.guestDrawEnabled;guestDrawToggle.checked=guestDrawEnabled;}
   if(state.guestDiceEnabled!==undefined){guestDiceEnabled=state.guestDiceEnabled;if(guestDiceToggle)guestDiceToggle.checked=guestDiceEnabled;}
   if(state.guestDiceThrowEnabled!==undefined){guestDiceThrowEnabled=state.guestDiceThrowEnabled;if(guestDiceThrowToggle)guestDiceThrowToggle.checked=guestDiceThrowEnabled;}
+  if(state.guestFreeMoveEnabled!==undefined){guestFreeMoveEnabled=state.guestFreeMoveEnabled;if(guestFreeMoveToggle)guestFreeMoveToggle.checked=guestFreeMoveEnabled;}
   if(state.guestInitiativeEnabled!==undefined){guestInitiativeEnabled=state.guestInitiativeEnabled;if(guestInitiativeToggle)guestInitiativeToggle.checked=guestInitiativeEnabled;}
   if(state.initiativeDisplayOrder!==undefined){
     initiativeDisplayOrder=state.initiativeDisplayOrder;
@@ -1344,6 +1361,7 @@ function applyGuestState(state) {
   if(state.guestDiceEnabled!==undefined){
     guestDiceEnabled=state.guestDiceEnabled;
     guestDiceThrowEnabled=state.guestDiceThrowEnabled||false;
+    guestFreeMoveEnabled=state.guestFreeMoveEnabled||false;
     updateGuestDicePanel();
     document.getElementById('guestControls')?.style && (document.getElementById('guestControls').style.display='flex');
   }
@@ -1441,6 +1459,7 @@ function syncToServer(){
     guestDrawEnabled:guestDrawToggle.checked,
     guestDiceEnabled:guestDiceToggle.checked,
     guestDiceThrowEnabled:guestDiceThrowToggle.checked,
+    guestFreeMoveEnabled:guestFreeMoveToggle?.checked||false,
     guestInitiativeEnabled:guestInitiativeToggle?!!guestInitiativeToggle.checked:true,
     initiativeDisplayOrder,
     diceSettings:window.combatDice?.getSettings?.()||clampDiceSettings(),
@@ -1883,6 +1902,7 @@ if(isHost){
   guestDrawToggle.addEventListener('change',()=>{const en=guestDrawToggle.checked;if(!en&&objects.some(o=>o.guestDrawn)){showConfirm('Clear guest drawings too?',()=>{objects=objects.filter(o=>!o.guestDrawn);drawAll();syncToServer();},()=>syncToServer());}else{syncToServer();}});
   guestDiceToggle.addEventListener('change',()=>syncToServer());
   guestDiceThrowToggle.addEventListener('change',()=>syncToServer());
+  guestFreeMoveToggle?.addEventListener('change',()=>syncToServer());
   guestInitiativeToggle?.addEventListener('change',()=>syncToServer());
   backgroundFillModeEl?.addEventListener('change',()=>{
     backgroundFillMode=backgroundFillModeEl.value||'stretch';
@@ -4526,7 +4546,9 @@ function spawnFromWikiTemplate(tmpl){
 function looksLikeWikiEnemyDrag(evt){
   if(!evt||!evt.dataTransfer) return false;
   const types=Array.from(evt.dataTransfer.types||[]);
-  return types.includes('application/x-ttrpg-enemy')||types.includes('application/json');
+  // Only match the specific enemy type — application/json is shared with item drags
+  // so it cannot be used here as a discriminator.
+  return types.includes('application/x-ttrpg-enemy');
 }
 
 function normalizeDroppedWikiEnemy(dataTransfer){
@@ -4555,7 +4577,15 @@ function normalizeDroppedWikiEnemy(dataTransfer){
 
     // Preferred custom payloads
     push(dataTransfer.getData('application/x-ttrpg-enemy'));
-    push(dataTransfer.getData('application/json'));
+    // Only fall back to application/json when this is not an item drag —
+    // both enemy and item drags set application/json, so it must not be
+    // used as a discriminator when the item-specific type is present.
+    {
+      const allTypes = Array.from(dataTransfer.types || []);
+      if(!allTypes.includes('application/x-ttrpg-item')){
+        push(dataTransfer.getData('application/json'));
+      }
+    }
 
     // Browser-friendly fallbacks
     push(dataTransfer.getData('text/plain'));
@@ -4675,8 +4705,14 @@ function normalizeDroppedWikiItem(dataTransfer){
   };
   const direct=tryParse(dataTransfer.getData('application/x-ttrpg-item'));
   if(direct)return direct;
-  const maybeJson=tryParse(dataTransfer.getData('application/json'));
-  if(maybeJson&&(maybeJson.weight!==undefined||maybeJson.description!==undefined||maybeJson.type!==undefined))return maybeJson;
+  // Only fall back to application/json when this is not an enemy drag —
+  // both enemy and item drags set application/json, so reading it here
+  // without guarding would misidentify enemy drops as items.
+  const allTypes=Array.from(dataTransfer.types||[]);
+  if(!allTypes.includes('application/x-ttrpg-enemy')){
+    const maybeJson=tryParse(dataTransfer.getData('application/json'));
+    if(maybeJson&&(maybeJson.weight!==undefined||maybeJson.description!==undefined||maybeJson.type!==undefined))return maybeJson;
+  }
   return null;
 }
 

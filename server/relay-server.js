@@ -793,7 +793,8 @@ if (msg.type === 'dice_roll_prompt' && ws.mode === 'host') {
 
       if (msg.type === 'dice_roll_state' && ws.mode === 'host') {
         room.state.diceState = deepClone(msg.state || msg);
-        sendToHost(room, { type: 'state_echo', state: room.state });
+        // Do NOT echo dice_roll_state back to host — the host is the authoritative source and
+        // echoing the full room state at 60fps causes significant main-thread overhead.
         broadcastToGuests(room, { type: 'dice_roll_state', ...msg });
         return;
       }

@@ -728,8 +728,6 @@ class CombatDiceRoller{
     const d=this._dice[this._draggedDieIdx];
     if(!d){this._draggedDieIdx=null;return;}
     d.body.type=CANNON.Body.DYNAMIC;
-    d.body.mass=1;
-    if(d.body.updateMassProperties)d.body.updateMassProperties();
     const cur=this._dragCurWorld||{wx:0,wz:0};
     const prev=this._dragPrevWorld||cur;
     const dt=Math.max(0.016,((this._dragCurTime||0)-(this._dragPrevTime||0))/1000);

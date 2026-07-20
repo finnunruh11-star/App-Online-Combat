@@ -41,6 +41,30 @@ The app opens the lobby and starts the embedded relay automatically.
 3. Enter the room code.
 4. Click **Join session**.
 
+## Mobile access
+
+The relay also serves a browser version of the lobby and combat screen.
+
+### Same Wi-Fi network
+
+1. Start the desktop app on the host computer and create a room.
+2. Find the host computer's local IPv4 address with `ipconfig`.
+3. On the phone, open `http://HOST_IP:3000` (for example, `http://192.168.1.25:3000`).
+4. Enter the room code and player name, then join.
+
+Windows may ask for firewall access the first time. Allow Node.js/TTRPG Combat on private networks so phones on the same Wi-Fi can connect.
+
+### Over the internet
+
+Install `cloudflared` before starting the desktop app. Create a room and share the generated `https://...trycloudflare.com` invite URL plus the room code. That URL now opens the browser lobby directly.
+
+The mobile combat view keeps the battlefield full-width and provides four bottom actions:
+
+- **Move**: select your token, tap a destination, then submit the move. Hosts can toggle drag-to-move.
+- **Measure**: select a token, tap Measure, then drag across the battlefield.
+- **Dice**: opens the compact dice roller.
+- **Initiative**: opens the initiative list.
+
 ## Packaging
 
 To build an installer or standalone package:

@@ -243,6 +243,7 @@ let canvasSpawnPos={x:0,y:0}; // position for right-click entity spawn
 let localSelection=null, lastTargetPos=null, imgCache={}, avatarCache={};
 let guestIsDrawing=false, guestCurrentDrawing=null, guestMeasuring=null;
 let guestBrushSize=2, guestStrokeColor='#818cf8', guestActiveTab='main';
+let mobileToolMode=null, mobileZoom=1, mobilePinch=null;
 let pendingNewPortrait=null, pendingEditPortrait=null, portraitEditorState=null;
 // anim
 let animLoopRunning=false;
@@ -2654,6 +2655,23 @@ function drawParticipants(){
       ctx.restore();
     }
 
+    if(isActive&&isMobileCombat()){
+      ctx.save();
+      ctx.fillStyle='rgba(56,189,248,.2)';
+      ctx.beginPath();ctx.arc(px,py,pr+22,0,Math.PI*2);ctx.fill();
+      ctx.shadowColor='#38bdf8';ctx.shadowBlur=20;
+      ctx.strokeStyle='#e0f2fe';ctx.lineWidth=6;ctx.setLineDash([]);
+      ctx.beginPath();ctx.arc(px,py,pr+18,0,Math.PI*2);ctx.stroke();
+      ctx.shadowBlur=0;ctx.fillStyle='#38bdf8';
+      ctx.beginPath();ctx.moveTo(px,py-pr-27);ctx.lineTo(px-12,py-pr-44);ctx.lineTo(px+12,py-pr-44);ctx.closePath();ctx.fill();
+      ctx.font='bold 16px Source Sans 3, sans-serif';ctx.textAlign='center';
+      const labelY=py+pr+38;
+      ctx.fillStyle='rgba(3,18,31,.94)';ctx.fillRect(px-45,labelY-16,90,23);
+      ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.strokeRect(px-45,labelY-16,90,23);
+      ctx.fillStyle='#e0f2fe';ctx.fillText('SELECTED',px,labelY+2);
+      ctx.restore();
+    }
+
     ctx.textAlign='left';ctx.restore();
   });
   cleanupAnimatedEmoteOverlays(activeAnimatedEmotes);
@@ -2766,7 +2784,13 @@ function drawSelectionRect(){
 /* ================================================================
    HIT TESTING
 ================================================================ */
-function screenToCanvas(evt){const r=canvas.getBoundingClientRect();return{x:evt.clientX-r.left,y:evt.clientY-r.top};}
+function screenToCanvas(evt){
+  const r=canvas.getBoundingClientRect();
+  return{
+    x:(evt.clientX-r.left)*(canvas.width/r.width),
+    y:(evt.clientY-r.top)*(canvas.height/r.height),
+  };
+}
 function findParticipantAt(pos){for(const p of[...participants].reverse())if(Math.sqrt((pos.x-p.x)**2+(pos.y-p.y)**2)<=(p.radius||PARTICLE_RADIUS))return p;return null;}
 function boundingBoxFor(pts){const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);const mx=Math.min(...xs),my=Math.min(...ys);return{x:mx,y:my,w:Math.max(...xs)-mx,h:Math.max(...ys)-my};}
 function findObjectAt(pos){
@@ -2787,6 +2811,12 @@ function ptSegDist(pt,a,b){const vx=b.x-a.x,vy=b.y-a.y,wx=pt.x-a.x,wy=pt.y-a.y,c
 canvas.addEventListener('mousedown',evt=>{
   if(evt.button===2)return;
   const pos=screenToCanvas(evt);isMouseDown=true;mouseDownPos=pos;
+
+  if(isMobileCombat()&&mobileToolMode==='measure'){
+    const ruler=isHost?measuring:guestMeasuring;
+    if(ruler?.active){ruler.cursorX=pos.x;ruler.cursorY=pos.y;drawAll();}
+    return;
+  }
 
   // 3D die pickup (host always; guest only when guestDiceThrowEnabled)
   if(window.combatDice&&window.combatDice._dice.length>0&&(isHost||guestDiceThrowEnabled)){
@@ -2813,11 +2843,19 @@ canvas.addEventListener('mousedown',evt=>{
         const myTokenIds=participants.filter(pp=>pp.assignedTo===GUEST_NAME||(pp.ownerId&&participants.find(o=>o.id===pp.ownerId&&o.assignedTo===GUEST_NAME))).map(pp=>pp.id);
         const displayName=p.publicDisplayName||p.name||'Entity';
         guestSelectedInfo.textContent=myTokenIds.length>1?`🎮 ${displayName} — click others to switch`:`✅ Selected: ${displayName}`;
+        if(isMobileCombat())mobileStatus.textContent=`Selected: ${displayName}`;
         refreshGuestChargeControls();
         drawAll();
       }
-    } else if(!p){
-      if(localSelection){lastTargetPos=pos;updateGuestTargetInfo();}drawAll();
+    } else if(!p&&(!isMobileCombat()||mobileToolMode==='move')){
+      if(localSelection){
+        lastTargetPos=pos;updateGuestTargetInfo();
+        if(isMobileCombat()){
+          guestRequestMoveBtn.click();
+          mobileStatus.textContent='Move request sent';
+        }
+      }
+      drawAll();
     }
     return;
   }
@@ -2864,7 +2902,9 @@ canvas.addEventListener('mousedown',evt=>{
       participantDragOffset={x:pos.x-p.x,y:pos.y-p.y};
       drawAll();return;
     }
-    activeParticipant=p;updateInitiativeList();refreshHpControls();drawAll();return;
+    activeParticipant=p;
+    if(isMobileCombat())mobileStatus.textContent=`Selected: ${p.name||'token'}`;
+    updateInitiativeList();refreshHpControls();drawAll();return;
   }
 
   if(!activeParticipant)return;
@@ -2988,6 +3028,135 @@ canvas.addEventListener('contextmenu',evt=>{
 
 canvas.addEventListener('wheel',e=>{if(!isHost||!e.shiftKey||!selectedObject||selectedObjects.length>1)return;const o=selectedObject;if(o.type!=='image')return;e.preventDefault();const delta=e.deltaY<0?1.1:0.9;o.w*=delta;o.h*=delta;drawAll();},{passive:false});
 canvas.addEventListener('mouseleave',()=>{if(draggingDie){draggingDie=false;window.combatDice?.releaseDieDrag();}if(!isHost)return;isMouseDown=false;isDrawing=false;draggingObjectRef=null;draggingParticipantRef=null;selecting=false;selectionRect=null;drawAll();});
+
+function dispatchTouchAsMouse(type,touch){
+  canvas.dispatchEvent(new MouseEvent(type,{
+    bubbles:true,
+    cancelable:true,
+    clientX:touch.clientX,
+    clientY:touch.clientY,
+    button:0,
+  }));
+}
+
+function isMobileCombat(){return matchMedia('(max-width: 900px), (pointer: coarse)').matches;}
+
+function setMobileZoom(nextZoom,focusClientX=null,focusClientY=null){
+  const battleWrap=document.getElementById('battle-wrap');
+  const container=document.getElementById('canvas-container');
+  const previousZoom=mobileZoom;
+  mobileZoom=Math.max(1,Math.min(3,Math.round(nextZoom*20)/20));
+  const focusX=focusClientX??(battleWrap.getBoundingClientRect().left+battleWrap.clientWidth/2);
+  const focusY=focusClientY??(battleWrap.getBoundingClientRect().top+battleWrap.clientHeight/2);
+  const localX=battleWrap.scrollLeft+focusX-battleWrap.getBoundingClientRect().left;
+  const localY=battleWrap.scrollTop+focusY-battleWrap.getBoundingClientRect().top;
+  container.style.width=`${mobileZoom*100}%`;
+  battleWrap.scrollLeft=(localX/previousZoom)*mobileZoom-(focusX-battleWrap.getBoundingClientRect().left);
+  battleWrap.scrollTop=(localY/previousZoom)*mobileZoom-(focusY-battleWrap.getBoundingClientRect().top);
+  document.getElementById('mobile-zoom-value').textContent=`${Math.round(mobileZoom*100)}%`;
+}
+
+function touchDistance(touches){return Math.hypot(touches[0].clientX-touches[1].clientX,touches[0].clientY-touches[1].clientY);}
+
+canvas.addEventListener('touchstart',evt=>{
+  if(evt.touches.length===2){
+    evt.preventDefault();
+    mobilePinch={distance:touchDistance(evt.touches),zoom:mobileZoom};
+    isMouseDown=false;
+    return;
+  }
+  if(evt.touches.length!==1)return;
+  evt.preventDefault();
+  dispatchTouchAsMouse('mousedown',evt.touches[0]);
+},{passive:false});
+canvas.addEventListener('touchmove',evt=>{
+  if(evt.touches.length===2&&mobilePinch){
+    evt.preventDefault();
+    const midpointX=(evt.touches[0].clientX+evt.touches[1].clientX)/2;
+    const midpointY=(evt.touches[0].clientY+evt.touches[1].clientY)/2;
+    setMobileZoom(mobilePinch.zoom*(touchDistance(evt.touches)/mobilePinch.distance),midpointX,midpointY);
+    return;
+  }
+  if(evt.touches.length!==1)return;
+  evt.preventDefault();
+  dispatchTouchAsMouse('mousemove',evt.touches[0]);
+},{passive:false});
+canvas.addEventListener('touchend',evt=>{
+  evt.preventDefault();
+  if(mobilePinch){
+    if(evt.touches.length<2)mobilePinch=null;
+    return;
+  }
+  const touch=evt.changedTouches[0];
+  if(touch)dispatchTouchAsMouse('mouseup',touch);
+},{passive:false});
+
+const mobileStatus=document.getElementById('mobile-status');
+const mobileMoveBtn=document.getElementById('mobileMoveBtn');
+const mobileMeasureBtn=document.getElementById('mobileMeasureBtn');
+const mobileDiceBtn=document.getElementById('mobileDiceBtn');
+const mobileInitBtn=document.getElementById('mobileInitBtn');
+const mobileSidebar=document.getElementById('sidebar');
+const mobileInitiative=document.getElementById('right-sidebar');
+
+function setMobileToolMode(nextMode){
+  mobileToolMode=mobileToolMode===nextMode?null:nextMode;
+  if(mobileToolMode!=='measure'){
+    measuring=null;guestMeasuring=null;
+  }
+  if(mobileToolMode!=='move')lastTargetPos=null;
+  if(isHost&&hostFreeMoveMode!==(mobileToolMode==='move'))document.getElementById('globalMoveToolBtn')?.click();
+  mobileMoveBtn.classList.toggle('active',mobileToolMode==='move');
+  mobileMeasureBtn.classList.toggle('active',mobileToolMode==='measure');
+  mobileStatus.textContent=mobileToolMode==='move'?'Tap a destination to move':mobileToolMode==='measure'?'Drag across the battlefield to measure':'Select a token, then choose a tool';
+  updateGuestTargetInfo();drawAll();
+}
+
+function closeMobileDrawers(){
+  mobileSidebar.classList.remove('mobile-open');
+  mobileInitiative.classList.remove('mobile-open');
+  mobileDiceBtn.classList.remove('active');
+  mobileInitBtn.classList.remove('active');
+}
+
+mobileMoveBtn?.addEventListener('click',()=>{
+  closeMobileDrawers();
+  setMobileToolMode('move');
+});
+
+mobileMeasureBtn?.addEventListener('click',()=>{
+  closeMobileDrawers();
+  const participant=isHost?activeParticipant:participants.find(p=>p.id===localSelection);
+  if(!participant){mobileStatus.textContent='Select a token first';return;}
+  setMobileToolMode('measure');
+  if(mobileToolMode==='measure'){
+    if(isHost)measuring={entity:participant,active:true,cursorX:participant.x,cursorY:participant.y};
+    else guestMeasuring={entity:participant,active:true,cursorX:participant.x,cursorY:participant.y};
+    drawAll();
+  }
+});
+
+document.getElementById('mobileZoomOut')?.addEventListener('click',()=>setMobileZoom(mobileZoom-.25));
+document.getElementById('mobileZoomIn')?.addEventListener('click',()=>setMobileZoom(mobileZoom+.25));
+
+mobileDiceBtn?.addEventListener('click',()=>{
+  const opening=!mobileSidebar.classList.contains('mobile-open');
+  closeMobileDrawers();
+  if(!opening)return;
+  mobileSidebar.classList.add('mobile-open');
+  mobileDiceBtn.classList.add('active');
+  const target=document.getElementById('dice-panel');
+  target?.scrollIntoView({block:'start'});
+});
+
+mobileInitBtn?.addEventListener('click',()=>{
+  const opening=!mobileInitiative.classList.contains('mobile-open');
+  closeMobileDrawers();
+  if(!opening)return;
+  mobileInitiative.classList.remove('collapsed');
+  mobileInitiative.classList.add('mobile-open');
+  mobileInitBtn.classList.add('active');
+});
 
 function handleWikiEnemyDrop(evt){
   const tmpl = normalizeDroppedWikiEnemy(evt.dataTransfer);
@@ -4800,6 +4969,12 @@ function startInvDrag(itemId,evt){
   body.addEventListener('mouseup',onUp);
 }
 
+function getItemImage(item){
+  if(item.image)return item.image;
+  const TYPE_ICONS={armor:'icons/armor.png',weapon:'icons/Weapon.png',loot:'icons/Loot.png',accessory:'icons/acessory.png',misc:'icons/Misc.png'};
+  return TYPE_ICONS[String(item.type||'').toLowerCase().trim()]||'';
+}
+
 function renderInventory(){
   BAG_IDS.forEach(bagId=>{
     const suffix=bagId.charAt(0).toUpperCase()+bagId.slice(1);
@@ -4826,7 +5001,7 @@ function renderInventory(){
       el.style.height=size+'px';
       el.style.left=(item.location.x||20)+'px';
       el.style.top=(item.location.y||20)+'px';
-      if(item.image)el.style.backgroundImage=`url("${item.image}")`;
+      const _img=getItemImage(item);if(_img)el.style.backgroundImage=`url("${_img}")`;
       el.title=`${item.name} (${Math.round(Number(item.weight)||0)} Kg)`;
       el.addEventListener('mousedown',evt=>startInvDrag(item.id,evt));
       el.addEventListener('contextmenu',evt=>{
@@ -4894,7 +5069,7 @@ function renderInventorySlots(bagId){
       el.style.left='50%';
       el.style.top='50%';
       el.style.transform='translate(-50%, -50%)';
-      if(item.image)el.style.backgroundImage=`url("${item.image}")`;
+      const _slotImg=getItemImage(item);if(_slotImg)el.style.backgroundImage=`url("${_slotImg}")`;
       el.title=`${item.name} (${(Number(item.weight)||0).toFixed(1)} Kg)`;
       el.addEventListener('mousedown',evt=>startInvDrag(item.id,evt));
       el.addEventListener('contextmenu',evt=>{
@@ -4925,7 +5100,7 @@ function renderCanvasInventoryLayer(){
     el.style.height=size+'px';
     el.style.left=(pos.x-size/2)+'px';
     el.style.top=(pos.y-size/2)+'px';
-    if(item.image)el.style.backgroundImage=`url("${item.image}")`;
+    const _canvasImg=getItemImage(item);if(_canvasImg)el.style.backgroundImage=`url("${_canvasImg}")`;
     el.title=`${item.name} (${(Number(item.weight)||0).toFixed(1)} Kg)`;
     el.addEventListener('mousedown',evt=>startInvDrag(item.id,evt));
     el.addEventListener('contextmenu',evt=>{
@@ -4942,7 +5117,7 @@ function openInventoryItemViewer(item){
   details.push(`<div><strong>Weight:</strong> ${(Number(item.weight)||0).toFixed(1)} Kg</div>`);
   details.push(`<div><strong>Size:</strong> ${escHtml(String(item.size||'medium'))}</div>`);
   if(item.description)details.push(`<div style="margin-top:8px;white-space:pre-wrap">${escHtml(item.description)}</div>`);
-  const img=item.image?`<div style="margin-bottom:8px"><div style="width:120px;height:120px;border-radius:10px;background:#111827 center/cover no-repeat;border:1px solid rgba(255,255,255,.15);background-image:url('${escHtml(item.image)}')"></div></div>`:'';
+  const _detailImg=getItemImage(item);const img=_detailImg?`<div style="margin-bottom:8px"><div style="width:120px;height:120px;border-radius:10px;background:#111827 center/cover no-repeat;border:1px solid rgba(255,255,255,.15);background-image:url('${escHtml(_detailImg)}')"></div></div>`:'';
   openItemViewer({name:item.name,_html:img+details.join('')},'Inventory');
 }
 
@@ -4971,8 +5146,9 @@ function renderWikiItems(){
     const card=document.createElement('div');
     card.className='wiki-item-card';
     card.draggable=true;
+    const _wikiImg=getItemImage(tmpl);
     card.innerHTML=`
-      <div class="wiki-item-thumb" style="${tmpl.image?`background-image:url('${escHtml(tmpl.image)}')`:''}"></div>
+      <div class="wiki-item-thumb" style="${_wikiImg?`background-image:url('${escHtml(_wikiImg)}')`:''}"></div>
       <div class="wiki-item-meta">
         <div class="wiki-item-name">${escHtml(String(tmpl.name||'Item'))}</div>
         <div class="wiki-item-info">${escHtml(String(tmpl.type||'type'))} · ${(Number(tmpl.weight)||0).toFixed(1)} Kg</div>

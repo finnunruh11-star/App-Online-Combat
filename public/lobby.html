@@ -72,9 +72,9 @@
 <body>
   <div class="shell">
     <section class="card hero">
-      <div class="badge">Desktop session lobby</div>
+      <div class="badge">Session lobby</div>
       <h1>TTRPG Combat</h1>
-      <p>Host a room or join one by code. The combat window opens separately and talks to the relay server directly. No tunnel URL handling in the browser.</p>
+      <p>Host a room or join one by code from desktop or mobile. The battlefield opens directly and stays synchronized through the relay.</p>
       <div class="room-box" id="roomBox" style="display:none">
         <div class="tiny">Your room code</div>
         <div class="room-code" id="roomCode">------</div>
@@ -141,7 +141,7 @@
     const runtimeText = $('runtimeText');
 
     const saved = {
-      serverUrl: localStorage.getItem('ttrpg.serverUrl') || 'http://127.0.0.1:3000',
+      serverUrl: localStorage.getItem('ttrpg.serverUrl') || (location.protocol.startsWith('http') ? location.origin : 'http://127.0.0.1:3000'),
       hostName: localStorage.getItem('ttrpg.hostName') || 'DM',
       guestName: localStorage.getItem('ttrpg.guestName') || 'Player',
       roomCode: localStorage.getItem('ttrpg.roomCode') || '',
@@ -175,6 +175,12 @@
       return value.replace(/\/+$/, '');
     }
 
+    function openCombatInBrowser({ mode, name, room, serverUrl }) {
+      const wsUrl = serverUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+      const params = new URLSearchParams({ mode, name, room, ws: wsUrl });
+      location.href = `/combat/index.html?${params.toString()}`;
+    }
+
     let latestRuntime = null;
     let relayUrlManuallyEdited = false;
 
@@ -184,6 +190,7 @@
     }
 
     async function hydrateRuntime() {
+      if (!window.desktopAPI) return;
       try {
         const info = await window.desktopAPI.getRuntimeInfo();
         latestRuntime = info;
@@ -213,7 +220,16 @@
         const serverUrl = normalizeServerUrl($('serverUrl').value);
         const hostName = $('hostName').value.trim() || 'DM';
         setStatus('Creating room…');
-        const result = await window.desktopAPI.createSession({ serverUrl, name: hostName });
+        const result = window.desktopAPI
+          ? await window.desktopAPI.createSession({ serverUrl, name: hostName })
+          : await fetch(`${serverUrl}/api/rooms`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: hostName, hostName }),
+            }).then(res => {
+              if (!res.ok) throw new Error(`Room creation failed (${res.status}).`);
+              return res.json();
+            });
         const room = result?.room?.code || result?.room?.roomCode || '';
         if (!room) throw new Error('No room code returned from server.');
         $('roomCodeInput').value = room;
@@ -222,6 +238,10 @@
         if (result?.publicUrl) {
           runtimeBox.style.display = 'block';
           runtimeText.textContent = `Invite URL: ${result.publicUrl}`;
+        }
+        if (!window.desktopAPI) {
+          openCombatInBrowser({ mode: 'host', name: hostName, room, serverUrl });
+          return;
         }
         setStatus(`Room ${room} created. Combat window opened.`, 'ok');
       } catch (err) {
@@ -237,10 +257,19 @@
         const room = $('roomCodeInput').value.trim().toUpperCase();
         if (!room) throw new Error('Enter a room code.');
         setStatus('Joining room…');
-        const result = await window.desktopAPI.joinSession({ serverUrl, name: guestName, room });
+        const result = window.desktopAPI
+          ? await window.desktopAPI.joinSession({ serverUrl, name: guestName, room })
+          : await fetch(`${serverUrl}/api/rooms/${encodeURIComponent(room)}`).then(res => {
+              if (!res.ok) throw new Error('Room not found.');
+              return { ok: true };
+            });
         if (!result?.ok) throw new Error('Join was not accepted.');
         roomCodeEl.textContent = room;
         roomBox.style.display = 'block';
+        if (!window.desktopAPI) {
+          openCombatInBrowser({ mode: 'guest', name: guestName, room, serverUrl });
+          return;
+        }
         setStatus(`Joined room ${room}. Combat window opened.`, 'ok');
       } catch (err) {
         setStatus(err?.message || String(err), 'bad');
@@ -276,7 +305,7 @@
     });
 
     hydrateRuntime();
-    setInterval(hydrateRuntime, 5000);
+    if (window.desktopAPI) setInterval(hydrateRuntime, 5000);
   </script>
 </body>
 </html>

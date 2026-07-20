@@ -11,7 +11,7 @@ let relayInstance = null;
 let tunnelProcess = null;
 let tunnelUrl = null;
 let runtimeInfo = {
-  relayHost: '127.0.0.1',
+  relayHost: '0.0.0.0',
   relayPort: Number(process.env.TTRPG_PORT || 3000),
   relayUrl: null,
   tunnelUrl: null,

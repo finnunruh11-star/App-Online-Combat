@@ -2,9 +2,12 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const crypto = require('crypto');
+const path = require('path');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+app.use(express.static(path.join(__dirname, '..', 'public')));
+app.get('/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'lobby.html')));
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -807,13 +810,14 @@ setInterval(() => {
   }
 }, 30_000);
 
-function startRelayServer({ port = PORT, host = '127.0.0.1' } = {}) {
+function startRelayServer({ port = PORT, host = '0.0.0.0' } = {}) {
   return new Promise((resolve) => {
     const listener = server.listen(port, host, () => {
       const address = listener.address();
       const actualPort = typeof address === 'object' && address ? address.port : port;
       const actualHost = typeof address === 'object' && address && address.address && address.address !== '::' ? address.address : host;
-      console.log(`Relay server running on http://${actualHost}:${actualPort}`);
+      const publicHost = actualHost === '0.0.0.0' ? '127.0.0.1' : actualHost;
+      console.log(`Relay server running on http://${publicHost}:${actualPort}`);
       resolve({
         app,
         server,
@@ -821,7 +825,7 @@ function startRelayServer({ port = PORT, host = '127.0.0.1' } = {}) {
         rooms,
         port: actualPort,
         host: actualHost,
-        url: `http://${actualHost}:${actualPort}`,
+        url: `http://${publicHost}:${actualPort}`,
         close: () => new Promise((r) => listener.close(() => r())),
       });
     });

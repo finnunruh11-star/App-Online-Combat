@@ -243,7 +243,7 @@ let canvasSpawnPos={x:0,y:0}; // position for right-click entity spawn
 let localSelection=null, lastTargetPos=null, imgCache={}, avatarCache={};
 let guestIsDrawing=false, guestCurrentDrawing=null, guestMeasuring=null;
 let guestBrushSize=2, guestStrokeColor='#818cf8', guestActiveTab='main';
-let mobileToolMode=null, mobileZoom=1, mobilePinch=null;
+let mobileToolMode=null, mobileZoom=1, mobilePinch=null, mobilePan=null, mobilePingIndex=null;
 let pendingNewPortrait=null, pendingEditPortrait=null, portraitEditorState=null;
 // anim
 let animLoopRunning=false;
@@ -2946,6 +2946,16 @@ canvas.addEventListener('mousedown',evt=>{
   if(evt.button===2)return;
   const pos=screenToCanvas(evt);isMouseDown=true;mouseDownPos=pos;
 
+  if(isMobileCombat()&&mobilePingIndex!==null){
+    const pingIndex=mobilePingIndex;
+    mobilePingIndex=null;
+    mobilePingBtn.classList.remove('active');
+    sendMapPingAt(pos.x,pos.y,pingIndex);
+    mobileStatus.textContent='Ping sent';
+    isMouseDown=false;
+    return;
+  }
+
   if(isMobileCombat()&&mobileToolMode==='measure'){
     const ruler=isHost?measuring:guestMeasuring;
     if(ruler?.active){ruler.cursorX=pos.x;ruler.cursorY=pos.y;drawAll();}
@@ -3041,6 +3051,7 @@ canvas.addEventListener('mousedown',evt=>{
     updateInitiativeList();refreshHpControls();drawAll();return;
   }
 
+  if(isMobileCombat()&&mobileToolMode!=='move')return;
   if(!activeParticipant)return;
   moveConfig=moveConfigToggle.checked;
   if(!moveConfig&&activeParticipant!==participants[turnIndex]&&!(activeParticipant.ownerId&&participants[turnIndex]&&participants[turnIndex].id===activeParticipant.ownerId))return;
@@ -3190,6 +3201,18 @@ function setMobileZoom(nextZoom,focusClientX=null,focusClientY=null){
   document.getElementById('mobile-zoom-value').textContent=`${Math.round(mobileZoom*100)}%`;
 }
 
+function resetMobileCamera(){
+  setMobileZoom(1);
+  requestAnimationFrame(()=>{
+    const battleWrap=document.getElementById('battle-wrap');
+    battleWrap.scrollTo({
+      left:Math.max(0,(battleWrap.scrollWidth-battleWrap.clientWidth)/2),
+      top:Math.max(0,(battleWrap.scrollHeight-battleWrap.clientHeight)/2),
+      behavior:'smooth',
+    });
+  });
+}
+
 function touchDistance(touches){return Math.hypot(touches[0].clientX-touches[1].clientX,touches[0].clientY-touches[1].clientY);}
 
 canvas.addEventListener('touchstart',evt=>{
@@ -3201,6 +3224,11 @@ canvas.addEventListener('touchstart',evt=>{
   }
   if(evt.touches.length!==1)return;
   evt.preventDefault();
+  if(isMobileCombat()&&!mobileToolMode){
+    const touch=evt.touches[0];
+    mobilePan={startX:touch.clientX,startY:touch.clientY,lastX:touch.clientX,lastY:touch.clientY,moved:false};
+    return;
+  }
   dispatchTouchAsMouse('mousedown',evt.touches[0]);
 },{passive:false});
 canvas.addEventListener('touchmove',evt=>{
@@ -3209,6 +3237,18 @@ canvas.addEventListener('touchmove',evt=>{
     const midpointX=(evt.touches[0].clientX+evt.touches[1].clientX)/2;
     const midpointY=(evt.touches[0].clientY+evt.touches[1].clientY)/2;
     setMobileZoom(mobilePinch.zoom*(touchDistance(evt.touches)/mobilePinch.distance),midpointX,midpointY);
+    return;
+  }
+  if(evt.touches.length===1&&mobilePan){
+    evt.preventDefault();
+    const touch=evt.touches[0];
+    if(Math.hypot(touch.clientX-mobilePan.startX,touch.clientY-mobilePan.startY)>5)mobilePan.moved=true;
+    if(mobilePan.moved){
+      const battleWrap=document.getElementById('battle-wrap');
+      battleWrap.scrollLeft-=touch.clientX-mobilePan.lastX;
+      battleWrap.scrollTop-=touch.clientY-mobilePan.lastY;
+    }
+    mobilePan.lastX=touch.clientX;mobilePan.lastY=touch.clientY;
     return;
   }
   if(evt.touches.length!==1)return;
@@ -3221,19 +3261,83 @@ canvas.addEventListener('touchend',evt=>{
     if(evt.touches.length<2)mobilePinch=null;
     return;
   }
+  if(mobilePan){
+    const pan=mobilePan;
+    mobilePan=null;
+    const touch=evt.changedTouches[0];
+    if(touch&&!pan.moved){
+      dispatchTouchAsMouse('mousedown',touch);
+      dispatchTouchAsMouse('mouseup',touch);
+    }
+    return;
+  }
   const touch=evt.changedTouches[0];
   if(touch)dispatchTouchAsMouse('mouseup',touch);
 },{passive:false});
+canvas.addEventListener('touchcancel',()=>{mobilePan=null;mobilePinch=null;isMouseDown=false;},{passive:false});
 
 const mobileStatus=document.getElementById('mobile-status');
 const mobileMoveBtn=document.getElementById('mobileMoveBtn');
 const mobileMeasureBtn=document.getElementById('mobileMeasureBtn');
+const mobileEmoteBtn=document.getElementById('mobileEmoteBtn');
+const mobilePingBtn=document.getElementById('mobilePingBtn');
 const mobileDiceBtn=document.getElementById('mobileDiceBtn');
 const mobileInitBtn=document.getElementById('mobileInitBtn');
 const mobileSidebar=document.getElementById('sidebar');
 const mobileInitiative=document.getElementById('right-sidebar');
+const mobileActionPanel=document.getElementById('mobile-action-panel');
+const mobileActionTitle=document.getElementById('mobile-action-title');
+const mobileActionGrid=document.getElementById('mobile-action-grid');
+
+function closeMobileActionPanel(){
+  mobileActionPanel.classList.remove('open');
+  mobileActionPanel.removeAttribute('data-kind');
+  mobileEmoteBtn.classList.remove('active');
+  mobilePingBtn.classList.remove('active');
+}
+
+function addMobileActionOption(label,src,onSelect){
+  const button=document.createElement('button');
+  button.type='button';
+  if(src){const img=document.createElement('img');img.src=src;img.alt='';button.appendChild(img);}
+  const text=document.createElement('span');text.textContent=label;button.appendChild(text);
+  button.addEventListener('click',onSelect);
+  mobileActionGrid.appendChild(button);
+}
+
+function openMobileEmotes(){
+  const target=getEmoteTargetParticipant();
+  if(!target){mobileStatus.textContent='Select your token first';return;}
+  mobilePingIndex=null;
+  closeMobileDrawers();
+  mobileActionPanel.dataset.kind='emote';mobileActionTitle.textContent='Choose emote';mobileActionGrid.innerHTML='';
+  EMOTE_DATA.forEach(meta=>addMobileActionOption(meta.label,meta.src,()=>{
+    applyParticipantEmote(target,meta.key,meta.durationMs,true);
+    mobileStatus.textContent=`Emote: ${meta.label}`;closeMobileActionPanel();
+  }));
+  addMobileActionOption('Clear',null,()=>{clearParticipantEmote(target,true);mobileStatus.textContent='Emote cleared';closeMobileActionPanel();});
+  mobileActionPanel.classList.add('open');mobileEmoteBtn.classList.add('active');
+}
+
+function openMobilePings(){
+  closeMobileDrawers();
+  mobileActionPanel.dataset.kind='ping';mobileActionTitle.textContent='Choose ping';mobileActionGrid.innerHTML='';
+  [...PING_SECTORS,PING_CENTER].forEach(index=>{
+    const ping=PING_DATA[index];
+    addMobileActionOption(ping.label,ping.src,()=>{
+      if(mobileToolMode)setMobileToolMode(null);
+      mobilePingIndex=index;
+      mobileStatus.textContent=`Tap the battlefield: ${ping.label}`;
+      closeMobileActionPanel();
+      mobilePingBtn.classList.add('active');
+    });
+  });
+  mobileActionPanel.classList.add('open');mobilePingBtn.classList.add('active');
+}
 
 function setMobileToolMode(nextMode){
+  mobilePingIndex=null;
+  mobilePingBtn.classList.remove('active');
   mobileToolMode=mobileToolMode===nextMode?null:nextMode;
   if(mobileToolMode!=='measure'){
     measuring=null;guestMeasuring=null;
@@ -3251,6 +3355,7 @@ function closeMobileDrawers(){
   mobileInitiative.classList.remove('mobile-open');
   mobileDiceBtn.classList.remove('active');
   mobileInitBtn.classList.remove('active');
+  closeMobileActionPanel();
 }
 
 mobileMoveBtn?.addEventListener('click',()=>{
@@ -3270,8 +3375,21 @@ mobileMeasureBtn?.addEventListener('click',()=>{
   }
 });
 
+mobileEmoteBtn?.addEventListener('click',()=>{
+  if(mobileActionPanel.classList.contains('open')&&mobileActionPanel.dataset.kind==='emote'){closeMobileActionPanel();return;}
+  openMobileEmotes();
+});
+
+mobilePingBtn?.addEventListener('click',()=>{
+  if(mobileActionPanel.classList.contains('open')&&mobileActionPanel.dataset.kind==='ping'){closeMobileActionPanel();return;}
+  openMobilePings();
+});
+
+document.getElementById('mobile-action-close')?.addEventListener('click',closeMobileActionPanel);
+
 document.getElementById('mobileZoomOut')?.addEventListener('click',()=>setMobileZoom(mobileZoom-.25));
 document.getElementById('mobileZoomIn')?.addEventListener('click',()=>setMobileZoom(mobileZoom+.25));
+document.getElementById('mobileResetCamera')?.addEventListener('click',resetMobileCamera);
 
 mobileDiceBtn?.addEventListener('click',()=>{
   const opening=!mobileSidebar.classList.contains('mobile-open');
@@ -3484,6 +3602,17 @@ function openPingMenu(sx,sy){
   pingOverlay().classList.add('active');drawPingMenu();
 }
 
+function sendMapPingAt(x,y,pingIndex){
+  const jitter=8,jx=x+(Math.random()-0.5)*jitter,jy=y+(Math.random()-0.5)*jitter;
+  const ping=PING_DATA[pingIndex];
+  if(!ping)return;
+  const fromName=isHost?'DM':GUEST_NAME;
+  const pingId=`ping-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+  rememberPingId(pingId);
+  addPingEffect(jx,jy,pingIndex,ping.label,fromName);
+  send({type:'map_ping',x:jx,y:jy,pingIndex,label:ping.label,fromName,pingId,source:isHost?'host':'guest'});
+}
+
 function firePing(sector){
   if(!pingMenuActive)return;
   const origin={...pingMenuOrigin};
@@ -3492,16 +3621,10 @@ function firePing(sector){
   const cr=canvas.getBoundingClientRect();
   const cx=origin.x-cr.left,cy=origin.y-cr.top;
   if(cx<0||cy<0||cx>canvas.width||cy>canvas.height)return;
-  const jitter=8,jx=cx+(Math.random()-0.5)*jitter,jy=cy+(Math.random()-0.5)*jitter;
   // -1 = released outside wheel: use last hovered sector if any, else fall back to center
   const resolved=sector===-1?(savedLast>=0?savedLast:8):sector;
   const pingIdx=resolved===8?PING_CENTER:PING_SECTORS[resolved];
-  const label=PING_DATA[pingIdx].label;
-  const fromName=isHost?'DM':GUEST_NAME;
-  const pingId=`ping-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
-  rememberPingId(pingId);
-  addPingEffect(jx,jy,pingIdx,label,fromName);
-  send({type:'map_ping',x:jx,y:jy,pingIndex:pingIdx,label,fromName,pingId,source:isHost?'host':'guest'});
+  sendMapPingAt(cx,cy,pingIdx);
 }
 
 function closePingMenu(){

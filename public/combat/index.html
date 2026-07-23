@@ -419,7 +419,7 @@
   #itemCreatorModal.open{display:flex}
   #itemCreatorBox{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;width:460px;max-width:94vw;display:flex;flex-direction:column;gap:8px;box-shadow:0 18px 56px rgba(0,0,0,.8)}
 
-  #mobile-toolbar,#mobile-status,#mobile-zoom{display:none}
+  #mobile-toolbar,#mobile-status,#mobile-zoom,#mobile-action-panel{display:none}
   @media (max-width: 900px), (pointer: coarse) {
     body{height:100dvh;padding-bottom:64px;position:relative}
     #battle-wrap{position:absolute;inset:0 0 64px;display:flex;align-items:flex-start;justify-content:flex-start;overflow:auto;padding:0;background:#090d18}
@@ -438,7 +438,7 @@
     #right-sidebar.collapsed #rs-header h2{display:block}
     #right-sidebar.collapsed #rs-collapsed-label{display:none}
     #reminder-toasts{right:10px;bottom:76px;left:10px}
-    #mobile-toolbar{position:fixed;display:grid;grid-template-columns:repeat(4,1fr);left:0;right:0;bottom:0;height:64px;z-index:900;background:rgba(15,20,37,.98);border-top:1px solid rgba(255,255,255,.14);padding:6px max(8px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));gap:5px}
+    #mobile-toolbar{position:fixed;display:grid;grid-template-columns:repeat(6,1fr);left:0;right:0;bottom:0;height:64px;z-index:900;background:rgba(15,20,37,.98);border-top:1px solid rgba(255,255,255,.14);padding:6px max(8px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));gap:2px}
     #mobile-toolbar button{height:48px;padding:4px 2px;background:transparent;color:var(--text-muted);border:1px solid transparent;border-radius:6px;font-size:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
     #mobile-toolbar button.active{color:var(--accent2);background:rgba(245,166,35,.1);border-color:rgba(245,166,35,.24)}
     .mobile-tool-icon{font-size:20px;line-height:1}
@@ -446,15 +446,25 @@
     #mobile-zoom{display:flex;position:fixed;z-index:720;right:8px;top:max(8px,env(safe-area-inset-top));align-items:center;gap:2px;padding:3px;background:rgba(15,20,37,.92);border:1px solid rgba(255,255,255,.14);border-radius:6px}
     #mobile-zoom button{width:38px;height:36px;padding:0;background:transparent;color:var(--text);border-radius:4px;font-size:20px}
     #mobile-zoom-value{min-width:44px;text-align:center;color:var(--text-muted);font-size:11px;font-weight:700}
+    #mobile-action-panel{position:fixed;display:none;z-index:880;left:8px;right:8px;bottom:72px;padding:8px;background:rgba(15,20,37,.98);border:1px solid rgba(255,255,255,.16);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.55)}
+    #mobile-action-panel.open{display:block}
+    .mobile-action-head{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+    #mobile-action-title{flex:1;font-size:12px;font-weight:700;color:var(--accent2);text-transform:uppercase}
+    #mobile-action-close{width:34px;height:30px;padding:0;background:transparent;color:var(--text-muted);font-size:18px}
+    #mobile-action-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;max-height:230px;overflow-y:auto}
+    #mobile-action-grid button{height:56px;padding:4px 3px;background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--text);font-size:10px;display:flex;align-items:center;justify-content:center;gap:5px}
+    #mobile-action-grid img{width:32px;height:32px;object-fit:contain;flex-shrink:0}
   }
   @media (orientation: landscape) and (max-height: 760px) and (max-width: 1000px), (orientation: landscape) and (max-height: 760px) and (pointer: coarse) {
     body{padding:0 64px 0 0}
     #battle-wrap{inset:0 64px 0 0}
     #sidebar,#right-sidebar{inset:0 64px 0 0}
-    #mobile-toolbar{left:auto;top:0;right:0;bottom:0;width:64px;height:auto;grid-template-columns:1fr;grid-template-rows:repeat(4,1fr);padding:max(6px,env(safe-area-inset-top)) 6px max(6px,env(safe-area-inset-bottom));border-top:0;border-left:1px solid rgba(255,255,255,.14)}
+    #mobile-toolbar{left:auto;top:0;right:0;bottom:0;width:64px;height:auto;grid-template-columns:1fr;grid-template-rows:repeat(6,1fr);padding:max(6px,env(safe-area-inset-top)) 6px max(6px,env(safe-area-inset-bottom));border-top:0;border-left:1px solid rgba(255,255,255,.14)}
     #mobile-toolbar button{width:52px;height:100%;max-height:72px;align-self:center}
     #mobile-status{top:max(8px,env(safe-area-inset-top));left:calc(50% - 32px);max-width:calc(100vw - 220px)}
     #mobile-zoom{right:72px}
+    #mobile-action-panel{left:auto;right:72px;bottom:8px;width:290px;max-height:calc(100dvh - 16px)}
+    #mobile-action-grid{max-height:calc(100dvh - 62px)}
   }
 
 </style>
@@ -937,13 +947,23 @@
   <button id="mobileZoomOut" type="button" title="Zoom out" aria-label="Zoom out">−</button>
   <span id="mobile-zoom-value">100%</span>
   <button id="mobileZoomIn" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+  <button id="mobileResetCamera" type="button" title="Reset camera" aria-label="Reset camera">⌖</button>
 </div>
 <nav id="mobile-toolbar" aria-label="Battlefield tools">
   <button id="mobileMoveBtn" type="button"><span class="mobile-tool-icon">↗</span><span>Move</span></button>
   <button id="mobileMeasureBtn" type="button"><span class="mobile-tool-icon">⌁</span><span>Measure</span></button>
+  <button id="mobileEmoteBtn" type="button"><span class="mobile-tool-icon">☺</span><span>Emote</span></button>
+  <button id="mobilePingBtn" type="button"><span class="mobile-tool-icon">!</span><span>Ping</span></button>
   <button id="mobileDiceBtn" type="button"><span class="mobile-tool-icon">⚄</span><span>Dice</span></button>
   <button id="mobileInitBtn" type="button"><span class="mobile-tool-icon">☷</span><span>Initiative</span></button>
 </nav>
+<div id="mobile-action-panel" role="dialog" aria-modal="false" aria-labelledby="mobile-action-title">
+  <div class="mobile-action-head">
+    <div id="mobile-action-title"></div>
+    <button id="mobile-action-close" type="button" aria-label="Close">×</button>
+  </div>
+  <div id="mobile-action-grid"></div>
+</div>
 
 <!-- EDIT MODAL -->
 <div id="editModal">

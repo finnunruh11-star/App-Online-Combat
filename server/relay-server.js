@@ -68,12 +68,16 @@ function defaultGameState() {
     guestInitiativeEnabled: false,
     guestDiceEnabled: false,
     guestDiceThrowEnabled: false,
+    guestFreeMoveEnabled: false,
     initiativeDisplayOrder: 'initiative',
     diceSettings: defaultDiceSettings(),
     diceState: null,
     latestDicePrompt: null,
     bagItems: [],
     bagWeightMultipliers: { fin: 0, nad: 0, kat: 0 },
+    backgroundImageSrc: '',
+    backgroundFillMode: 'stretch',
+    overlayImageSrc: null,
   };
 }
 
@@ -129,6 +133,7 @@ function roomSnapshot(room) {
 
 function maskStateForGuest(room, guestName) {
   const current = room.state.participants[room.state.turnIndex];
+  const now = Date.now();
   return {
     participants: room.state.participants.map(p => ({
       id: p.id,
@@ -152,6 +157,11 @@ function maskStateForGuest(room, guestName) {
       emoteUntil: p.emoteUntil || null,
       ownerId: p.ownerId || null,
       name: p.ownerId ? p.name : undefined,
+      emoteDurationRemaining: (p.emoteUntil && p.emoteUntil > now) ? (p.emoteUntil - now) : (p.emoteUntil === null ? null : 0),
+      emoteSrc: p.emoteSrc || null,
+      emoteAnimated: !!p.emoteAnimated,
+      emoteScale: p.emoteScale || 1,
+      avatar: p.avatar || p.portrait || p.sprite || p.image || null,
     })),
     objects: room.state.objects,
     turnIndex: room.state.turnIndex,
@@ -163,6 +173,7 @@ function maskStateForGuest(room, guestName) {
     guestInitiativeEnabled: room.state.guestInitiativeEnabled,
     guestDiceEnabled: room.state.guestDiceEnabled,
     guestDiceThrowEnabled: room.state.guestDiceThrowEnabled,
+    guestFreeMoveEnabled: room.state.guestFreeMoveEnabled,
     initiativeDisplayOrder: room.state.initiativeDisplayOrder,
     diceSettings: room.state.diceSettings,
     latestDicePrompt: room.state.latestDicePrompt,
@@ -173,6 +184,9 @@ function maskStateForGuest(room, guestName) {
     customEnemyEmotes: room.state.customEnemyEmotes || null,
     roomCode: room.code,
     guestName: guestName || null,
+    backgroundImageSrc: room.state.backgroundImageSrc || '',
+    backgroundFillMode: room.state.backgroundFillMode || 'stretch',
+    overlayImageSrc: room.state.overlayImageSrc || null,
   };
 }
 
@@ -192,6 +206,17 @@ function broadcastGuestState(room) {
 
 function sendToHost(room, msg) {
   if (room.hostSocket && room.hostSocket.readyState === WebSocket.OPEN) {
+    // Convert absolute emoteUntil to relative duration for clock-skew safety
+    if (msg.type === 'state_echo' && msg.state && Array.isArray(msg.state.participants)) {
+      const now = Date.now();
+      const converted = { ...msg, state: { ...msg.state, participants: msg.state.participants.map(p => {
+        if (p.emoteUntil === null || p.emoteUntil === undefined) return { ...p, emoteDurationRemaining: p.emoteUntil === null ? null : undefined, emoteUntil: undefined };
+        const remaining = p.emoteUntil - now;
+        return { ...p, emoteDurationRemaining: remaining > 0 ? remaining : 0, emoteUntil: undefined };
+      })}};
+      room.hostSocket.send(JSON.stringify(converted));
+      return;
+    }
     room.hostSocket.send(JSON.stringify(msg));
   }
 }
@@ -216,9 +241,10 @@ function updateStateFromHost(room, msg) {
   const keys = [
     'participants', 'objects', 'turnIndex', 'canvasWidth', 'canvasHeight', 'pixelsPerUnit',
     'moveToleranceUnits', 'autoApproveIfWithinTolerance', 'guestDrawEnabled', 'guestInitiativeEnabled',
-    'guestDiceEnabled', 'guestDiceThrowEnabled', 'initiativeDisplayOrder', 'diceSettings',
+    'guestDiceEnabled', 'guestDiceThrowEnabled', 'guestFreeMoveEnabled', 'initiativeDisplayOrder', 'diceSettings',
     'diceState', 'latestDicePrompt', 'bagItems', 'bagWeightMultipliers',
     'customEmotes', 'customEnemyEmotes',
+    'backgroundImageSrc', 'backgroundFillMode', 'overlayImageSrc',
   ];
   for (const key of keys) {
     if (src[key] !== undefined) room.state[key] = deepClone(src[key]);
@@ -461,16 +487,19 @@ wss.on('connection', ws => {
           return;
         }
 
-        const key = String(msg.emoteKey || '').trim().toLowerCase();
+        const key = String(msg.emoteKey || '').trim();
         if (!key) {
           ws.send(JSON.stringify({ type: 'guest_emote_result', ok: false, reason: 'bad_emote_key' }));
           return;
         }
 
         const durationRaw = Number.parseInt(msg.durationMs, 10);
-        const durationMs = Number.isNaN(durationRaw) ? 1000 : Math.max(250, Math.min(10000, durationRaw));
+        const durationMs = Number.isNaN(durationRaw) ? 1000 : Math.max(250, Math.min(60000, durationRaw));
         const loopsUntilInterrupt = !!msg.loop;
         p.emoteKey = key;
+        p.emoteSrc = msg.emoteSrc || null;
+        p.emoteAnimated = !!msg.emoteAnimated;
+        p.emoteScale = Number(msg.emoteScale) || 1;
         p.emoteUntil = loopsUntilInterrupt ? null : (Date.now() + durationMs);
 
         broadcastGuestState(room);
@@ -492,6 +521,9 @@ wss.on('connection', ws => {
 
         p.emoteKey = null;
         p.emoteUntil = null;
+        p.emoteSrc = null;
+        p.emoteAnimated = false;
+        p.emoteScale = 1;
         broadcastGuestState(room);
         sendToHost(room, { type: 'state_echo', state: room.state });
         ws.send(JSON.stringify({ type: 'guest_emote_result', ok: true }));
@@ -623,15 +655,18 @@ wss.on('connection', ws => {
         const remaining = Math.max(0, (p.speed || 0) - movedSoFar);
         const allowedThisMove = remaining + extraUnits;
 
-        if ((room.state.autoApproveIfWithinTolerance && distUnits <= allowedThisMove + room.state.moveToleranceUnits) || room.state.guestDiceThrowEnabled) {
+        if ((room.state.autoApproveIfWithinTolerance && distUnits <= allowedThisMove + room.state.moveToleranceUnits) || room.state.guestFreeMoveEnabled) {
           p.x = msg.target.x;
           p.y = msg.target.y;
           p.movedUnits = movedSoFar + distUnits;
           p.emoteKey = null;
           p.emoteUntil = null;
+          p.emoteSrc = null;
+          p.emoteAnimated = false;
+          p.emoteScale = 1;
           broadcastGuestState(room);
           sendToHost(room, { type: 'state_echo', state: room.state });
-          ws.send(JSON.stringify({ type: 'request_result', ok: true, autoApproved: true, reason: room.state.guestDiceThrowEnabled ? 'guest_dice_throw_enabled' : 'tolerance', newPos: { x: p.x, y: p.y } }));
+          ws.send(JSON.stringify({ type: 'request_result', ok: true, autoApproved: true, reason: room.state.guestFreeMoveEnabled ? 'guest_free_move_enabled' : 'tolerance', newPos: { x: p.x, y: p.y } }));
           return;
         }
 
@@ -681,6 +716,9 @@ wss.on('connection', ws => {
             p.movedUnits = (p.movedUnits || 0) + req.distUnits;
             p.emoteKey = null;
             p.emoteUntil = null;
+            p.emoteSrc = null;
+            p.emoteAnimated = false;
+            p.emoteScale = 1;
           }
           broadcastGuestState(room);
           sendToHost(room, { type: 'state_echo', state: room.state });

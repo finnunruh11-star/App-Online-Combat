@@ -203,7 +203,7 @@ let pendingInitiativeUpdate = false;
 ================================================================ */
 let participants=[], objects=[], turnIndex=0, pixelsPerUnit=20;
 let backgroundImageSrc='', backgroundFillMode='stretch', backgroundImageEl=null;
-let guestDrawEnabled=false, guestInitiativeEnabled=false, guestDiceEnabled=false, guestDiceThrowEnabled=false;
+let guestDrawEnabled=false, guestInitiativeEnabled=false, guestDiceEnabled=false, guestDiceThrowEnabled=false, guestFreeMoveEnabled=false;
 let initiativeDisplayOrder='initiative'; // 'initiative' | 'alpha'
 let roundNumber=0;
 let bagItems=[];
@@ -278,6 +278,22 @@ const selectedObjectLabel=document.getElementById('selectedObjectLabel'), delete
 const backgroundUploadEl=document.getElementById('backgroundUpload'), backgroundFillModeEl=document.getElementById('backgroundFillMode'), clearBackgroundBtn=document.getElementById('clearBackground');
 const imageUpload=document.getElementById('imageUpload'), guestDrawToggle=document.getElementById('guestDrawToggle');
 const guestDiceToggle=document.getElementById('guestDiceToggle'), guestDiceThrowToggle=document.getElementById('guestDiceThrowToggle');
+// Inject the free-move toggle adjacent to the dice-throw toggle in the host settings panel.
+// Done here so the const below can find it via getElementById like all other toggles.
+(() => {
+  const ref = document.getElementById('guestDiceThrowToggle');
+  if (ref && !document.getElementById('guestFreeMoveToggle')) {
+    const container = ref.closest('label') || ref.parentElement;
+    if (container) {
+      const label = document.createElement('label');
+      label.className = container.className || '';
+      label.title = 'Allow guests to move tokens beyond their speed limit without DM approval';
+      label.innerHTML = '<input type="checkbox" id="guestFreeMoveToggle"> Guests move freely (no speed limit)';
+      container.insertAdjacentElement('afterend', label);
+    }
+  }
+})();
+const guestFreeMoveToggle = document.getElementById('guestFreeMoveToggle');
 const guestInitiativeToggle=document.getElementById('guestInitiativeToggle');
 const manualCircleUnitsEl=document.getElementById('manualCircleUnits'), showManualCircleBtn=document.getElementById('showManualCircle');
 const newPortraitPreview=document.getElementById('newPortraitPreview'), newPortraitBtn=document.getElementById('newPortraitBtn'), clearNewPortraitBtn=document.getElementById('clearNewPortrait'), newPortraitFile=document.getElementById('newPortraitFile');
@@ -382,6 +398,13 @@ function ensureParticipantChargeFields(p){
   p.chargesTurnStartAdd=clampChargeGain(p.chargesTurnStartAdd);
   p.chargesTurnEndAdd=clampChargeGain(p.chargesTurnEndAdd);
   if(p.emoteKey===undefined)p.emoteKey=null;
+  // Convert relative duration from relay to local absolute timestamp
+  if(p.emoteDurationRemaining!==undefined){
+    if(p.emoteDurationRemaining===null) p.emoteUntil=null;
+    else if(p.emoteDurationRemaining<=0){ p.emoteUntil=0; }
+    else p.emoteUntil=Date.now()+p.emoteDurationRemaining;
+    delete p.emoteDurationRemaining;
+  }
   if(p.emoteUntil===undefined)p.emoteUntil=null;
   return p;
 }
@@ -391,17 +414,21 @@ function getEmoteByKey(key){
 function getEmoteImage(key){
   const meta=getEmoteByKey(key);
   if(!meta)return null;
-  if(!emoteImgCache.has(key)){
+  return getEmoteImageBySrc(key,meta.src);
+}
+function getEmoteImageBySrc(cacheKey,src){
+  if(!src)return null;
+  if(!emoteImgCache.has(cacheKey)){
     const img=new Image();
     img.onload=()=>{
       drawAll();
       if(emoteMenuActive)drawEmoteMenu();
       if(enemyEmoteMenuActive)drawEnemyEmoteMenu();
     };
-    img.src=meta.src;
-    emoteImgCache.set(key,img);
+    img.src=src;
+    emoteImgCache.set(cacheKey,img);
   }
-  return emoteImgCache.get(key);
+  return emoteImgCache.get(cacheKey);
 }
 function getEmoteOverlayLayer(){
   if(emoteOverlayLayer&&emoteOverlayLayer.isConnected)return emoteOverlayLayer;
@@ -482,12 +509,15 @@ function applyParticipantEmote(p,emoteKey,durationMs,notifyServer=true){
   if(!meta)return false;
   const loopsUntilInterrupt=!!meta.animated;
   p.emoteKey=meta.key;
-  p.emoteUntil=loopsUntilInterrupt?null:(Date.now()+Math.max(250,Math.min(10000,parseInt(durationMs,10)||meta.durationMs)));
+  p.emoteSrc=meta.src;
+  p.emoteAnimated=!!meta.animated;
+  p.emoteScale=meta.scale||1;
+  p.emoteUntil=loopsUntilInterrupt?null:(Date.now()+Math.max(250,Math.min(60000,parseInt(durationMs,10)||meta.durationMs)));
   startAnimLoop();
   drawAll();
   if(notifyServer){
     if(isHost)syncToServer();
-    else send({type:'guest_emote_set',participantId:p.id,emoteKey:p.emoteKey,durationMs:meta.durationMs,loop:loopsUntilInterrupt});
+    else send({type:'guest_emote_set',participantId:p.id,emoteKey:p.emoteKey,emoteSrc:meta.src,emoteAnimated:!!meta.animated,emoteScale:meta.scale||1,durationMs:parseInt(durationMs,10)||meta.durationMs,loop:loopsUntilInterrupt});
   }
   return true;
 }
@@ -495,6 +525,9 @@ function clearParticipantEmote(p,notifyServer=true){
   if(!p||(!p.emoteKey&&!p.emoteUntil))return false;
   p.emoteKey=null;
   p.emoteUntil=null;
+  p.emoteSrc=null;
+  p.emoteAnimated=false;
+  p.emoteScale=1;
   drawAll();
   if(notifyServer){
     if(isHost)syncToServer();
@@ -804,6 +837,60 @@ function rollPromptedDice(expr, promptId){
   requestDiceRoll(expr, { prompted: true, promptId });
 }
 
+/* ── DICE RESULT POPUP + HISTORY ── */
+let _dicePopupTimer=null;
+function showDiceResultPopup(detail){
+  const total=detail.total??detail.result??'';
+  const expression=detail.expression||'';
+  const thrower=detail.thrower||detail.fromGuestName||'';
+  const results=Array.isArray(detail.results)?detail.results:[];
+  const mod=detail.mod||0;
+  const parts=results.map(r=>`${(r.sign||1)<0?'−':''}${r.value}`);
+  if(mod!==0)parts.push((mod>0?'+':'')+mod);
+  const breakdown=parts.join(' + ').replace(/\+ −/g,'− ');
+
+  // Popup banner
+  const popup=document.getElementById('diceResultPopup');
+  if(popup){
+    popup.querySelector('.drp-thrower').textContent=thrower?`🎲 ${thrower}`:'\u200B';
+    popup.querySelector('.drp-total').textContent=total;
+    popup.querySelector('.drp-breakdown').textContent=breakdown||'';
+    popup.querySelector('.drp-expr').textContent=expression?`(${expression})`:'';
+    popup.classList.add('visible');
+    if(_dicePopupTimer)clearTimeout(_dicePopupTimer);
+    _dicePopupTimer=setTimeout(()=>{popup.classList.remove('visible');_dicePopupTimer=null;},4000);
+  }
+
+  // History log
+  addDiceHistoryEntry(thrower, total, breakdown, expression);
+}
+
+function addDiceHistoryEntry(thrower, total, breakdown, expression){
+  const now=new Date();
+  const timeStr=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  const html=`<div class="dice-history-entry">
+    <span class="dhe-thrower">${escHtml(thrower||'?')}</span>
+    <span class="dhe-total">${escHtml(String(total))}</span>
+    <span class="dhe-detail">${escHtml(expression||'')} ${breakdown?'= '+escHtml(breakdown):''}</span>
+    <span class="dhe-time">${timeStr}</span>
+  </div>`;
+  const hostLog=document.getElementById('diceHistoryLog');
+  const guestLog=document.getElementById('guestDiceHistoryLog');
+  if(hostLog){hostLog.insertAdjacentHTML('afterbegin',html);if(hostLog.children.length>50)hostLog.lastElementChild.remove();}
+  if(guestLog){guestLog.insertAdjacentHTML('afterbegin',html);if(guestLog.children.length>50)guestLog.lastElementChild.remove();}
+}
+
+// Listen for local dice results (host's own rolls settle in dice-physics.js)
+document.addEventListener('dice-result',e=>{
+  if(e.detail)showDiceResultPopup(e.detail);
+});
+
+// Clear history button
+document.getElementById('diceHistoryClear')?.addEventListener('click',()=>{
+  const h=document.getElementById('diceHistoryLog');if(h)h.innerHTML='';
+  const g=document.getElementById('guestDiceHistoryLog');if(g)g.innerHTML='';
+});
+
 function showDicePrompt(expr, promptId){
   if(isHost) return;
   const normalized=String(expr||'1d20').trim()||'1d20';
@@ -923,9 +1010,9 @@ function approvePendingRequest(req, approve) {
       const payload = makeSharedRollPayload(req);
       activeDiceRequestId = payload.requestId;
 
-      // If host dice are still marked as rolling, reset first so this approval
-      // cannot silently no-op due to the roller's early-return guard.
-      if (window.combatDice?._rolling) {
+      // If host dice are still marked as rolling and this is NOT a throw,
+      // reset first so this approval cannot silently no-op.
+      if (window.combatDice?._rolling && !payload.throwData) {
         window.clearCombatDice?.();
       }
 
@@ -1035,6 +1122,8 @@ function handleMessage(msg) {
     const s=document.getElementById('diceResult');
     const statusRequestId=msg.requestId||msg.id||null;
     const matchesActive=!statusRequestId||!activeDiceRequestId||statusRequestId===activeDiceRequestId;
+    // If dice are already rolling, ignore stale denied messages
+    const currentlyRolling=window.combatDice?._rolling;
     console.info('[combat] guest received dice_request_status',{
       statusRequestId,
       activeDiceRequestId,
@@ -1047,6 +1136,8 @@ function handleMessage(msg) {
       const g=document.getElementById('guestDiceStatus');
       if(matchesActive&&g){g.textContent='🎲 Approved — rolling…';g.style.color='var(--accent2)';}
     }else if(msg.approved===false){
+      // Ignore stale denial if dice are already rolling (request was approved via another path)
+      if(currentlyRolling){console.info('[combat] ignoring stale denial — dice already rolling');return;}
       if(matchesActive&&s){s.className='';s.textContent='❌ Dice request denied.';}
       const g=document.getElementById('guestDiceStatus');
       if(matchesActive&&g){g.textContent='❌ Dice request denied.';g.style.color='var(--danger)';}
@@ -1056,6 +1147,14 @@ function handleMessage(msg) {
   }
   if (msg.type==='dice_roll_start'){
     if(isHost&&msg.source==='host')return;
+    // Roll start implies the request was approved — clear active request so new throws aren't blocked
+    if(!isHost && activeDiceRequestId){
+      activeDiceRequestId=null;
+      const s=document.getElementById('diceResult');
+      if(s){s.className='rolling';s.textContent='🎲 Rolling…';}
+      const g=document.getElementById('guestDiceStatus');
+      if(g){g.textContent='🎲 Rolling…';g.style.color='var(--accent2)';}
+    }
     combatDice.startSharedRoll(msg);
     return;
   }
@@ -1066,6 +1165,7 @@ function handleMessage(msg) {
   }
 if (msg.type === 'dice_roll_result') {
   combatDice.applySharedResult(msg);
+  showDiceResultPopup(msg);
 
   const s = document.getElementById('diceResult');
 
@@ -1198,6 +1298,7 @@ function applyHostState(state) {
   if(state.guestDrawEnabled!==undefined){guestDrawEnabled=state.guestDrawEnabled;guestDrawToggle.checked=guestDrawEnabled;}
   if(state.guestDiceEnabled!==undefined){guestDiceEnabled=state.guestDiceEnabled;if(guestDiceToggle)guestDiceToggle.checked=guestDiceEnabled;}
   if(state.guestDiceThrowEnabled!==undefined){guestDiceThrowEnabled=state.guestDiceThrowEnabled;if(guestDiceThrowToggle)guestDiceThrowToggle.checked=guestDiceThrowEnabled;}
+  if(state.guestFreeMoveEnabled!==undefined){guestFreeMoveEnabled=state.guestFreeMoveEnabled;if(guestFreeMoveToggle)guestFreeMoveToggle.checked=guestFreeMoveEnabled;}
   if(state.guestInitiativeEnabled!==undefined){guestInitiativeEnabled=state.guestInitiativeEnabled;if(guestInitiativeToggle)guestInitiativeToggle.checked=guestInitiativeEnabled;}
   if(state.initiativeDisplayOrder!==undefined){
     initiativeDisplayOrder=state.initiativeDisplayOrder;
@@ -1221,12 +1322,7 @@ function applyHostState(state) {
   }
   if(state.bagItems!==undefined)bagItems=normalizeBagItems(state.bagItems);
   if(state.bagWeightMultipliers!==undefined)bagWeightMultipliers=normalizeBagWeightMultipliers(state.bagWeightMultipliers);
-  if(state.customEmotes&&Array.isArray(state.customEmotes)&&state.customEmotes.length===8){
-    applyEmoteConfig(state.customEmotes.map(e=>({...e})));
-  }
-  if(state.customEnemyEmotes&&Array.isArray(state.customEnemyEmotes)&&state.customEnemyEmotes.length===8){
-    applyEnemyEmoteConfig(state.customEnemyEmotes.map(e=>({...e})));
-  }
+  // Each client keeps their own emote wheel — no longer overwrite from server state
   if(!isHost && state.latestDicePrompt) showDicePrompt(state.latestDicePrompt.expression||state.latestDicePrompt.expr||'1d20', state.latestDicePrompt.id||state.latestDicePrompt.promptId);
   if(state.diceState) applyIncomingDiceState(state.diceState);
   if(activeParticipant)activeParticipant=participants.find(p=>p.id===activeParticipant.id)||null;
@@ -1266,6 +1362,7 @@ function applyGuestState(state) {
   if(state.guestDiceEnabled!==undefined){
     guestDiceEnabled=state.guestDiceEnabled;
     guestDiceThrowEnabled=state.guestDiceThrowEnabled||false;
+    guestFreeMoveEnabled=state.guestFreeMoveEnabled||false;
     updateGuestDicePanel();
     document.getElementById('guestControls')?.style && (document.getElementById('guestControls').style.display='flex');
   }
@@ -1274,14 +1371,7 @@ function applyGuestState(state) {
   }
   if(state.bagItems!==undefined)bagItems=normalizeBagItems(state.bagItems);
   if(state.bagWeightMultipliers!==undefined)bagWeightMultipliers=normalizeBagWeightMultipliers(state.bagWeightMultipliers);
-  // Apply host custom emotes on guest side
-  if(state.customEmotes&&Array.isArray(state.customEmotes)&&state.customEmotes.length===8){
-    applyEmoteConfig(state.customEmotes.map(e=>({...e})));
-  }
-  // Apply host custom enemy emotes on guest side
-  if(state.customEnemyEmotes&&Array.isArray(state.customEnemyEmotes)&&state.customEnemyEmotes.length===8){
-    applyEnemyEmoteConfig(state.customEnemyEmotes.map(e=>({...e})));
-  }
+  // Each client keeps their own emote wheel — no longer overwrite from host
   // Apply overlay from host
   if(state.overlayImageSrc!==undefined){
     applyOverlay(state.overlayImageSrc);
@@ -1316,7 +1406,7 @@ function hasContinuousTokenAnimation(){
     || damageAnimations.size>0
     || performance.now()<screenShakeUntil
     || participants.some(p=>p.pingUntil&&p.pingUntil>now)
-    || participants.some(p=>isEmoteActive(p,now)&&isEmoteAnimated(p.emoteKey));
+    || participants.some(p=>isEmoteActive(p,now)&&(p.emoteAnimated||isEmoteAnimated(p.emoteKey)));
 }
 function checkAndStartAnimLoop(){if(hasContinuousTokenAnimation())startAnimLoop();}
 function startAnimLoop(){
@@ -1370,6 +1460,7 @@ function syncToServer(){
     guestDrawEnabled:guestDrawToggle.checked,
     guestDiceEnabled:guestDiceToggle.checked,
     guestDiceThrowEnabled:guestDiceThrowToggle.checked,
+    guestFreeMoveEnabled:guestFreeMoveToggle?.checked||false,
     guestInitiativeEnabled:guestInitiativeToggle?!!guestInitiativeToggle.checked:true,
     initiativeDisplayOrder,
     diceSettings:window.combatDice?.getSettings?.()||clampDiceSettings(),
@@ -1377,8 +1468,6 @@ function syncToServer(){
     latestDicePrompt:lastDicePrompt,
     bagItems:normalizeBagItems(bagItems),
     bagWeightMultipliers:normalizeBagWeightMultipliers(bagWeightMultipliers),
-    customEmotes:EMOTE_DATA,
-    customEnemyEmotes:ENEMY_EMOTE_DATA,
     overlayImageSrc:currentOverlaySrc||null});
 }
 
@@ -1562,17 +1651,18 @@ function drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn,activeAnimatedEmotes
   }
 
   if(isEmoteActive(p)){
-    const emoteMeta=getEmoteByKey(p.emoteKey);
-    if(emoteMeta?.animated){
-      if(syncAnimatedEmoteOverlay(p,px,py,pr,emoteMeta)){
+    const eSrc=p.emoteSrc||(getEmoteByKey(p.emoteKey)||{}).src;
+    const eAnimated=p.emoteAnimated!==undefined?p.emoteAnimated:!!(getEmoteByKey(p.emoteKey)||{}).animated;
+    const eScale=p.emoteScale||(getEmoteByKey(p.emoteKey)||{}).scale||1;
+    if(eAnimated&&eSrc){
+      if(syncAnimatedEmoteOverlay(p,px,py,pr,{src:eSrc,scale:eScale})){
         if(activeAnimatedEmotes)activeAnimatedEmotes.add(p.id);
         return;
       }
     }
     removeEmoteOverlayNode(p.id);
-    const emoteImg=getEmoteImage(p.emoteKey);
+    const emoteImg=getEmoteImageBySrc(p.emoteKey,eSrc);
     if(emoteImg&&emoteImg.complete&&emoteImg.naturalWidth){
-      const eScale=emoteMeta.scale||1;
       const edw=dw*eScale,edh=dh*eScale;
       drawImageCover(ctx,emoteImg,px-edw/2,py-edh/2,edw,edh);
       return;
@@ -1813,6 +1903,7 @@ if(isHost){
   guestDrawToggle.addEventListener('change',()=>{const en=guestDrawToggle.checked;if(!en&&objects.some(o=>o.guestDrawn)){showConfirm('Clear guest drawings too?',()=>{objects=objects.filter(o=>!o.guestDrawn);drawAll();syncToServer();},()=>syncToServer());}else{syncToServer();}});
   guestDiceToggle.addEventListener('change',()=>syncToServer());
   guestDiceThrowToggle.addEventListener('change',()=>syncToServer());
+  guestFreeMoveToggle?.addEventListener('change',()=>syncToServer());
   guestInitiativeToggle?.addEventListener('change',()=>syncToServer());
   backgroundFillModeEl?.addEventListener('change',()=>{
     backgroundFillMode=backgroundFillModeEl.value||'stretch';
@@ -2609,7 +2700,50 @@ function drawParticipants(){
     if(usePlayerSprite){
       drawPlayerToken(ctx,p,px,py,pr,now,isActive,isTurn,activeAnimatedEmotes);
     } else {
-      removeEmoteOverlayNode(p.id);
+      // Check for active emote on enemy/non-player-sprite tokens
+      if(isEmoteActive(p)){
+        const eSrc=p.emoteSrc||(getEmoteByKey(p.emoteKey)||{}).src;
+        const eAnimated=p.emoteAnimated!==undefined?p.emoteAnimated:!!(getEmoteByKey(p.emoteKey)||{}).animated;
+        const eScale=p.emoteScale||(getEmoteByKey(p.emoteKey)||{}).scale||1;
+        if(eAnimated&&eSrc){
+          if(syncAnimatedEmoteOverlay(p,px,py,pr,{src:eSrc,scale:eScale})){
+            if(activeAnimatedEmotes)activeAnimatedEmotes.add(p.id);
+            ctx.restore();
+            ctx.save();
+            ctx.shadowBlur=0;
+            ctx.font='bold 12px Source Sans 3, sans-serif';ctx.textAlign='center';
+            if(isHost){
+              ctx.fillStyle='#e8e8f0';ctx.fillText(p.name,px,py-pr-6);
+            } else {
+              const label=guestDisplayName(p)||(p.ownerId?p.name:null);
+              if(label){ctx.fillStyle='#e8e8f0';ctx.fillText(label,px,py-pr-6);}
+            }
+            ctx.restore();
+            return;
+          }
+        }
+        removeEmoteOverlayNode(p.id);
+        const emoteImg=getEmoteImageBySrc(p.emoteKey,eSrc);
+        if(emoteImg&&emoteImg.complete&&emoteImg.naturalWidth){
+          const dw=pr*2.08*eScale,dh=pr*2.08*eScale;
+          drawImageCover(ctx,emoteImg,px-dw/2,py-dh/2,dw,dh);
+          ctx.restore();
+          ctx.save();
+          ctx.shadowBlur=0;
+          ctx.font='bold 12px Source Sans 3, sans-serif';ctx.textAlign='center';
+          if(isHost){
+            ctx.fillStyle='#e8e8f0';ctx.fillText(p.name,px,py-pr-6);
+          } else {
+            const label=guestDisplayName(p)||(p.ownerId?p.name:null);
+            if(label){ctx.fillStyle='#e8e8f0';ctx.fillText(label,px,py-pr-6);}
+          }
+          ctx.restore();
+          return;
+        }
+      } else {
+        removeEmoteOverlayNode(p.id);
+      }
+
       if(isTurn){ctx.shadowColor='#f5a623';ctx.shadowBlur=16;}
       ctx.beginPath();ctx.arc(px,py,pr,0,Math.PI*2);
       ctx.fillStyle=color;
@@ -4581,7 +4715,9 @@ function spawnFromWikiTemplate(tmpl){
 function looksLikeWikiEnemyDrag(evt){
   if(!evt||!evt.dataTransfer) return false;
   const types=Array.from(evt.dataTransfer.types||[]);
-  return types.includes('application/x-ttrpg-enemy')||types.includes('application/json');
+  // Only match the specific enemy type — application/json is shared with item drags
+  // so it cannot be used here as a discriminator.
+  return types.includes('application/x-ttrpg-enemy');
 }
 
 function normalizeDroppedWikiEnemy(dataTransfer){
@@ -4610,7 +4746,15 @@ function normalizeDroppedWikiEnemy(dataTransfer){
 
     // Preferred custom payloads
     push(dataTransfer.getData('application/x-ttrpg-enemy'));
-    push(dataTransfer.getData('application/json'));
+    // Only fall back to application/json when this is not an item drag —
+    // both enemy and item drags set application/json, so it must not be
+    // used as a discriminator when the item-specific type is present.
+    {
+      const allTypes = Array.from(dataTransfer.types || []);
+      if(!allTypes.includes('application/x-ttrpg-item')){
+        push(dataTransfer.getData('application/json'));
+      }
+    }
 
     // Browser-friendly fallbacks
     push(dataTransfer.getData('text/plain'));
@@ -4730,8 +4874,14 @@ function normalizeDroppedWikiItem(dataTransfer){
   };
   const direct=tryParse(dataTransfer.getData('application/x-ttrpg-item'));
   if(direct)return direct;
-  const maybeJson=tryParse(dataTransfer.getData('application/json'));
-  if(maybeJson&&(maybeJson.weight!==undefined||maybeJson.description!==undefined||maybeJson.type!==undefined))return maybeJson;
+  // Only fall back to application/json when this is not an enemy drag —
+  // both enemy and item drags set application/json, so reading it here
+  // without guarding would misidentify enemy drops as items.
+  const allTypes=Array.from(dataTransfer.types||[]);
+  if(!allTypes.includes('application/x-ttrpg-enemy')){
+    const maybeJson=tryParse(dataTransfer.getData('application/json'));
+    if(maybeJson&&(maybeJson.weight!==undefined||maybeJson.description!==undefined||maybeJson.type!==undefined))return maybeJson;
+  }
   return null;
 }
 
@@ -5473,7 +5623,7 @@ if(rollForAllGuestsBtn){
   if(!isHost)rollForAllGuestsBtn.style.display='none';
   rollForAllGuestsBtn.addEventListener('click',()=>{
     if(!isHost)return;
-    const expr=(document.getElementById('diceExpr').value||'').trim()||'1d20';
+    const expr=(document.getElementById('hostDiceExpr')?.value||document.getElementById('diceExpr')?.value||'').trim()||'1d20';
     if(!connectedGuests.length){showAlert('No guests are connected.');return;}
     lastDicePrompt={id:makeDiceRequestId(),expression:expr,createdAt:Date.now()};
     window.__broadcastAppMessage?.({type:'dice_roll_prompt',expression:expr,id:lastDicePrompt.id,source:'host',prompt:lastDicePrompt});
@@ -5490,9 +5640,30 @@ document.getElementById('clearDiceBtn').addEventListener('click',()=>{
     window.clearCombatDice?.();
   }
 });
+document.getElementById('clearAllDiceBtn')?.addEventListener('click',()=>{
+  if(window.__isHost){
+    window.clearCombatDice?.({broadcast:true});
+  }else{
+    window.clearCombatDice?.();
+  }
+});
 const guestDiceRequestBtn=document.getElementById('guestRequestDice');
 if(guestDiceRequestBtn){
   guestDiceRequestBtn.addEventListener('click',()=>requestDiceRoll(document.getElementById('guestDiceExpr')?.value||document.getElementById('diceExpr').value||'1d20'));
+}
+// Host dice roller in Dice Studio tab
+const hostRollBtn=document.getElementById('hostRollDiceBtn');
+if(hostRollBtn){
+  hostRollBtn.addEventListener('click',()=>{
+    const expr=(document.getElementById('hostDiceExpr')?.value||'').trim()||'1d20';
+    requestDiceRoll(expr);
+  });
+}
+const hostDiceExprEl=document.getElementById('hostDiceExpr');
+if(hostDiceExprEl){
+  hostDiceExprEl.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){const expr=e.target.value.trim()||'1d20';requestDiceRoll(expr);}
+  });
 }
 
 /* ================================================================
@@ -5532,6 +5703,11 @@ if(guestDiceRequestBtn){
           <label style="white-space:nowrap">Scale:</label>
           <input type="range" class="emote-slot-scale" data-idx="${i}" min="0.3" max="3" step="0.1" value="${slot.scale||1}" style="flex:1;height:14px;cursor:pointer">
           <span class="emote-slot-scale-val" data-idx="${i}" style="min-width:28px;text-align:right">${(slot.scale||1).toFixed(1)}x</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <label style="white-space:nowrap">Duration:</label>
+          <input type="number" class="emote-slot-duration" data-idx="${i}" min="250" max="60000" step="250" value="${slot.durationMs||1000}" style="width:70px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:3px 6px;color:var(--text);font-size:11px;text-align:center">
+          <span style="opacity:.6">ms</span>
         </div>
         <input type="file" class="emote-slot-file" data-idx="${i}" accept="image/*" style="display:none">
       `;
@@ -5581,7 +5757,9 @@ if(guestDiceRequestBtn){
       el.addEventListener('change',()=>{
         const idx=parseInt(el.dataset.idx);
         pendingSlots[idx].animated=el.checked;
-        pendingSlots[idx].durationMs=el.checked?4000:1000;
+        if(el.checked)pendingSlots[idx].durationMs=4000;
+        const durEl=grid.querySelector(`.emote-slot-duration[data-idx="${idx}"]`);
+        if(durEl)durEl.value=pendingSlots[idx].durationMs;
       });
     });
     grid.querySelectorAll('.emote-slot-scale').forEach(el=>{
@@ -5590,6 +5768,14 @@ if(guestDiceRequestBtn){
         const val=parseFloat(el.value)||1;
         pendingSlots[idx].scale=val;
         grid.querySelector(`.emote-slot-scale-val[data-idx="${idx}"]`).textContent=val.toFixed(1)+'x';
+      });
+    });
+    grid.querySelectorAll('.emote-slot-duration').forEach(el=>{
+      el.addEventListener('change',()=>{
+        const idx=parseInt(el.dataset.idx);
+        const val=Math.max(250,Math.min(60000,parseInt(el.value,10)||1000));
+        pendingSlots[idx].durationMs=val;
+        el.value=val;
       });
     });
     grid.querySelectorAll('.emote-slot-clear').forEach(el=>{
@@ -5606,6 +5792,7 @@ if(guestDiceRequestBtn){
         grid.querySelector(`.emote-slot-anim[data-idx="${idx}"]`).checked=def.animated;
         grid.querySelector(`.emote-slot-scale[data-idx="${idx}"]`).value=def.scale||1;
         grid.querySelector(`.emote-slot-scale-val[data-idx="${idx}"]`).textContent=(def.scale||1).toFixed(1)+'x';
+        grid.querySelector(`.emote-slot-duration[data-idx="${idx}"]`).value=def.durationMs||1000;
       });
     });
   }
@@ -5619,6 +5806,8 @@ if(guestDiceRequestBtn){
   }
 
   openBtn.addEventListener('click',openModal);
+  const floatingBtn=document.getElementById('floatingEmoteSettingsBtn');
+  if(floatingBtn)floatingBtn.addEventListener('click',openModal);
   closeBtn.addEventListener('click',closeModal);
   modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});
 
@@ -5631,13 +5820,11 @@ if(guestDiceRequestBtn){
     saveCustomEmotes(pendingSlots);
     applyEmoteConfig(pendingSlots.map(e=>({...e})));
     closeModal();
-    if(isHost)syncToServer();
   });
 
   resetBtn.addEventListener('click',()=>{
     localStorage.removeItem('customEmoteConfig');
     applyEmoteConfig(DEFAULT_EMOTE_DATA.map(e=>({...e})));
-    if(isHost)syncToServer();
     closeModal();
   });
 })();
@@ -5679,6 +5866,11 @@ if(guestDiceRequestBtn){
           <label style="white-space:nowrap">Scale:</label>
           <input type="range" class="enemy-emote-slot-scale" data-idx="${i}" min="0.3" max="3" step="0.1" value="${slot.scale||1}" style="flex:1;height:14px;cursor:pointer">
           <span class="enemy-emote-slot-scale-val" data-idx="${i}" style="min-width:28px;text-align:right">${(slot.scale||1).toFixed(1)}x</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted)">
+          <label style="white-space:nowrap">Duration:</label>
+          <input type="number" class="enemy-emote-slot-duration" data-idx="${i}" min="250" max="60000" step="250" value="${slot.durationMs||1000}" style="width:70px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:3px 6px;color:var(--text);font-size:11px;text-align:center">
+          <span style="opacity:.6">ms</span>
         </div>
         <input type="file" class="enemy-emote-slot-file" data-idx="${i}" accept="image/*" style="display:none">
       `;
@@ -5725,7 +5917,9 @@ if(guestDiceRequestBtn){
       el.addEventListener('change',()=>{
         const idx=parseInt(el.dataset.idx);
         pendingSlots[idx].animated=el.checked;
-        pendingSlots[idx].durationMs=el.checked?4000:1000;
+        if(el.checked)pendingSlots[idx].durationMs=4000;
+        const durEl=grid.querySelector(`.enemy-emote-slot-duration[data-idx="${idx}"]`);
+        if(durEl)durEl.value=pendingSlots[idx].durationMs;
       });
     });
     grid.querySelectorAll('.enemy-emote-slot-scale').forEach(el=>{
@@ -5734,6 +5928,14 @@ if(guestDiceRequestBtn){
         const val=parseFloat(el.value)||1;
         pendingSlots[idx].scale=val;
         grid.querySelector(`.enemy-emote-slot-scale-val[data-idx="${idx}"]`).textContent=val.toFixed(1)+'x';
+      });
+    });
+    grid.querySelectorAll('.enemy-emote-slot-duration').forEach(el=>{
+      el.addEventListener('change',()=>{
+        const idx=parseInt(el.dataset.idx);
+        const val=Math.max(250,Math.min(60000,parseInt(el.value,10)||1000));
+        pendingSlots[idx].durationMs=val;
+        el.value=val;
       });
     });
     grid.querySelectorAll('.enemy-emote-slot-clear').forEach(el=>{
@@ -5750,6 +5952,7 @@ if(guestDiceRequestBtn){
         grid.querySelector(`.enemy-emote-slot-anim[data-idx="${idx}"]`).checked=def.animated;
         grid.querySelector(`.enemy-emote-slot-scale[data-idx="${idx}"]`).value=def.scale||1;
         grid.querySelector(`.enemy-emote-slot-scale-val[data-idx="${idx}"]`).textContent=(def.scale||1).toFixed(1)+'x';
+        grid.querySelector(`.enemy-emote-slot-duration[data-idx="${idx}"]`).value=def.durationMs||1000;
       });
     });
   }
@@ -5778,13 +5981,11 @@ if(guestDiceRequestBtn){
     saveCustomEnemyEmotes(pendingSlots);
     applyEnemyEmoteConfig(pendingSlots.map(e=>({...e})));
     closeModal();
-    if(isHost)syncToServer();
   });
 
   resetBtn.addEventListener('click',()=>{
     localStorage.removeItem('customEnemyEmoteConfig');
     applyEnemyEmoteConfig(DEFAULT_ENEMY_EMOTE_DATA.map(e=>({...e})));
-    if(isHost)syncToServer();
     closeModal();
   });
 })();

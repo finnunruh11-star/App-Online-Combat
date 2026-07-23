@@ -214,6 +214,24 @@
   #guestDiceRequestPanel{display:flex}
   body.host-mode #dice-panel{display:none}
   body.guest-init-hidden #right-sidebar{display:none}
+  #floatingEmoteSettingsBtn{display:none;position:fixed;bottom:18px;right:18px;z-index:450;background:var(--surface);border:1px solid var(--border);border-radius:50%;width:38px;height:38px;font-size:18px;color:var(--text-muted);cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.5);align-items:center;justify-content:center;transition:color .15s,border-color .15s}
+  #floatingEmoteSettingsBtn:hover{color:var(--text);border-color:var(--accent)}
+  body.guest-init-hidden #floatingEmoteSettingsBtn{display:flex}
+
+  /* ── DICE RESULT POPUP ── */
+  #diceResultPopup{position:fixed;top:18px;left:50%;transform:translateX(-50%) translateY(-80px);z-index:800;background:linear-gradient(135deg,rgba(15,23,42,.97),rgba(30,41,59,.97));border:1px solid rgba(99,102,241,.6);border-radius:12px;padding:12px 24px;min-width:180px;max-width:400px;text-align:center;pointer-events:none;opacity:0;transition:transform .3s ease,opacity .3s ease;box-shadow:0 8px 32px rgba(0,0,0,.7)}
+  #diceResultPopup.visible{transform:translateX(-50%) translateY(0);opacity:1}
+  #diceResultPopup .drp-thrower{font-size:11px;color:var(--text-muted);margin-bottom:2px;text-transform:uppercase;letter-spacing:.5px}
+  #diceResultPopup .drp-total{font-size:28px;font-weight:700;color:var(--accent);font-family:'Cinzel',serif}
+  #diceResultPopup .drp-breakdown{font-size:12px;color:var(--text-muted);margin-top:2px}
+  #diceResultPopup .drp-expr{font-size:11px;color:rgba(255,255,255,.4);margin-top:4px}
+  /* ── DICE HISTORY LOG ── */
+  #diceHistoryLog{max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;margin-top:8px;padding:4px 0}
+  .dice-history-entry{display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(255,255,255,.03);border-radius:6px;font-size:12px;border:1px solid rgba(255,255,255,.06)}
+  .dice-history-entry .dhe-thrower{color:var(--accent2);font-weight:600;min-width:40px}
+  .dice-history-entry .dhe-total{color:var(--accent);font-weight:700;font-size:14px;min-width:30px;text-align:right}
+  .dice-history-entry .dhe-detail{color:var(--text-muted);flex:1}
+  .dice-history-entry .dhe-time{color:rgba(255,255,255,.3);font-size:10px;margin-left:auto;white-space:nowrap}
 
   /* ── PING RADIAL MENU ── */
   #ping-overlay{position:fixed;inset:0;z-index:500;pointer-events:none;display:none}
@@ -473,7 +491,7 @@
         <div class="tab-content active" id="tab-control">
           <div class="subtle-callout">Use this tab for combat control and rules toggles. Canvas building has its own tab.</div>
 
-          <details class="advanced-details" open>
+          <details class="advanced-details">
             <summary>Participant Creator</summary>
             <div class="stack-tight">
               <div><label class="field-label">Name</label><input id="name" placeholder="Character name…" /></div>
@@ -505,7 +523,7 @@
             </div>
           </details>
 
-          <details class="advanced-details" open>
+          <details class="advanced-details">
             <summary>Vitals: HP, Sanity, Charges</summary>
             <div class="stack-tight">
               <div class="panel-title">HP — Selected Token</div>
@@ -547,7 +565,7 @@
             </div>
           </details>
 
-          <details class="advanced-details" open>
+          <details class="advanced-details">
             <summary>Movement &amp; Range Tools</summary>
             <div class="stack-tight">
               <div class="row">
@@ -625,40 +643,65 @@
         <!-- DICE TAB -->
         <div class="tab-content" id="tab-dice">
           <div class="panel-title">Dice Studio</div>
-          <label class="checkbox"><input id="diceRandomizeColor" type="checkbox" checked /> Randomize colors per roll</label>
-          <div class="dice-setting">
-            <div class="dice-setting-head">
-              <span>Color</span>
-              <span id="diceColorSwatchLabel" class="dice-setting-value">Randomized</span>
-            </div>
-            <div class="row" style="align-items:center">
-              <input id="diceColor" type="color" value="#f7f8fd" style="max-width:72px" />
-              <div class="dice-setting-note">Used when random colors are turned off. Pips/numbers stay auto-contrasted and readable.</div>
-            </div>
+          <div class="dice-quick-btns" style="margin-bottom:6px">
+            <button class="dice-qbtn" data-expr="1d4">D4</button>
+            <button class="dice-qbtn" data-expr="1d6">D6</button>
+            <button class="dice-qbtn" data-expr="1d8">D8</button>
+            <button class="dice-qbtn" data-expr="1d10">D10</button>
+            <button class="dice-qbtn" data-expr="1d12">D12</button>
+            <button class="dice-qbtn d20" data-expr="1d20">D20</button>
+          </div>
+          <div class="dice-expr-row" style="margin-bottom:8px">
+            <input id="hostDiceExpr" placeholder="2d6+3…" />
+            <button id="hostRollDiceBtn" class="btn-primary btn-small">🎲 Roll</button>
+          </div>
+          <div class="row" style="gap:6px;margin-bottom:8px">
+            <button id="clearAllDiceBtn" class="btn-danger btn-small">🗑 Clear All Dice</button>
+            <button id="rollForAllGuestsBtn" class="btn-accent btn-small">📣 Prompt All Guests to Roll</button>
           </div>
 
-          <div class="dice-settings-grid">
-            <div class="dice-setting">
-              <div class="dice-setting-head"><span>Size</span><span id="diceSizeVal" class="dice-setting-value">1.00×</span></div>
-              <input id="diceSize" type="range" min="0.6" max="2.5" step="0.05" value="1" />
-            </div>
-            <div class="dice-setting">
-              <div class="dice-setting-head"><span>Velocity</span><span id="diceVelocityVal" class="dice-setting-value">9.0</span></div>
-              <input id="diceVelocity" type="range" min="1" max="30" step="0.25" value="9" />
-            </div>
-            <div class="dice-setting">
-              <div class="dice-setting-head"><span>Angular momentum</span><span id="diceSpinVal" class="dice-setting-value">12.0</span></div>
-              <input id="diceSpin" type="range" min="1" max="40" step="0.25" value="12" />
-            </div>
-            <div class="dice-setting">
-              <div class="dice-setting-head"><span>Bounce-factor</span><span id="diceBounceVal" class="dice-setting-value">0.22</span></div>
-              <input id="diceBounce" type="range" min="0" max="1" step="0.01" value="0.22" />
-            </div>
-          </div>
+          <details class="advanced-details">
+            <summary>Dice Settings</summary>
+            <div class="stack-tight">
+              <label class="checkbox"><input id="diceRandomizeColor" type="checkbox" checked /> Randomize colors per roll</label>
+              <div class="dice-setting">
+                <div class="dice-setting-head">
+                  <span>Color</span>
+                  <span id="diceColorSwatchLabel" class="dice-setting-value">Randomized</span>
+                </div>
+                <div class="row" style="align-items:center">
+                  <input id="diceColor" type="color" value="#f7f8fd" style="max-width:72px" />
+                  <div class="dice-setting-note">Used when random colors are turned off. Pips/numbers stay auto-contrasted and readable.</div>
+                </div>
+              </div>
 
-          <div class="small">These settings affect the next roll and are shared to guests by the host.</div>
-          <button id="diceResetSettings" class="btn-secondary btn-small">↺ Reset Dice Settings</button>
-          <button id="rollForAllGuestsBtn" class="btn-accent btn-small" style="margin-top:4px">📣 Prompt All Guests to Roll</button>
+              <div class="dice-settings-grid">
+                <div class="dice-setting">
+                  <div class="dice-setting-head"><span>Size</span><span id="diceSizeVal" class="dice-setting-value">1.00×</span></div>
+                  <input id="diceSize" type="range" min="0.6" max="2.5" step="0.05" value="1" />
+                </div>
+                <div class="dice-setting">
+                  <div class="dice-setting-head"><span>Velocity</span><span id="diceVelocityVal" class="dice-setting-value">9.0</span></div>
+                  <input id="diceVelocity" type="range" min="1" max="30" step="0.25" value="9" />
+                </div>
+                <div class="dice-setting">
+                  <div class="dice-setting-head"><span>Angular momentum</span><span id="diceSpinVal" class="dice-setting-value">12.0</span></div>
+                  <input id="diceSpin" type="range" min="1" max="40" step="0.25" value="12" />
+                </div>
+                <div class="dice-setting">
+                  <div class="dice-setting-head"><span>Bounce-factor</span><span id="diceBounceVal" class="dice-setting-value">0.22</span></div>
+                  <input id="diceBounce" type="range" min="0" max="1" step="0.01" value="0.22" />
+                </div>
+              </div>
+
+              <div class="small">These settings affect the next roll and are shared to guests by the host.</div>
+              <button id="diceResetSettings" class="btn-secondary btn-small">↺ Reset Dice Settings</button>
+            </div>
+          </details>
+          <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+            <div class="panel-title" style="font-size:12px;margin-bottom:4px">🎲 Roll History <button id="diceHistoryClear" class="btn-secondary btn-small" style="font-size:10px;padding:2px 6px;margin-left:8px;opacity:.6">Clear</button></div>
+            <div id="diceHistoryLog"></div>
+          </div>
         </div>
 
         <!-- DRAW TAB -->
@@ -757,6 +800,10 @@
             <button id="guestRequestDice" class="btn-accent btn-small">📩 Request</button>
           </div>
           <div id="guestDiceStatus" class="small" style="text-align:center;min-height:18px"></div>
+          <div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+            <div class="panel-title" style="font-size:12px;margin-bottom:4px">🎲 Roll History</div>
+            <div id="guestDiceHistoryLog" class="dice-history-log" style="max-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:4px"></div>
+          </div>
         </div>
 
         <div class="panel">
@@ -1038,7 +1085,7 @@
       <h3 style="margin:0;font-family:'Cinzel',serif;font-size:15px;color:var(--accent2);letter-spacing:.5px">Customize Emote Wheel</h3>
       <button id="emoteSettingsClose" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:2px 6px">✕</button>
     </div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Upload images or GIFs for each slot. Changes are saved locally and synced to guests when you host.</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Upload images or GIFs for each slot. Your wheel is personal — changes only affect you.</div>
     <div id="emoteSlotGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
     <div style="display:flex;gap:8px;margin-top:16px">
       <button id="emoteSettingsSave" style="flex:1;padding:10px;border:none;border-radius:10px;background:var(--primary);color:#fff;font-weight:700;font-size:13px;cursor:pointer">Save &amp; Apply</button>
@@ -1061,6 +1108,17 @@
       <button id="enemyEmoteSettingsReset" style="flex:1;padding:10px;border:none;border-radius:10px;background:rgba(248,113,113,.15);color:var(--danger);font-weight:700;font-size:13px;cursor:pointer;border:1px solid rgba(248,113,113,.3)">Reset to Defaults</button>
     </div>
   </div>
+</div>
+
+<!-- FLOATING EMOTE SETTINGS (guest, when sidebar hidden) -->
+<button id="floatingEmoteSettingsBtn" title="Customize Emote Wheel">⚙</button>
+
+<!-- DICE RESULT POPUP -->
+<div id="diceResultPopup">
+  <div class="drp-thrower"></div>
+  <div class="drp-total"></div>
+  <div class="drp-breakdown"></div>
+  <div class="drp-expr"></div>
 </div>
 
 <script defer src="js/app.js"></script>

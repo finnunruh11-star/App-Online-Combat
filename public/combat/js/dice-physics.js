@@ -347,18 +347,20 @@ function createDieVisual(sides,opts={}){
   return createCubeDie([3,4,1,6,2,5],'pip',opts);
 }
 
-function makeConvexShape(geometry){
+function makeConvexShape(geometry,scale){
+  scale=scale||1;
   const geo=geometry.index?geometry.toNonIndexed():geometry.clone();
   const pos=geo.attributes.position,verts=[],faces=[],map=new Map();
   const key=(x,y,z)=>`${x.toFixed(5)},${y.toFixed(5)},${z.toFixed(5)}`;
-  const idx=(x,y,z)=>{const k=key(x,y,z);if(!map.has(k)){map.set(k,verts.length);verts.push(new CANNON.Vec3(x,y,z));}return map.get(k);};
+  const idx=(x,y,z)=>{const k=key(x,y,z);if(!map.has(k)){map.set(k,verts.length);verts.push(new CANNON.Vec3(x*scale,y*scale,z*scale));}return map.get(k);};
   for(let i=0;i<pos.count;i+=3)faces.push([idx(pos.getX(i),pos.getY(i),pos.getZ(i)),idx(pos.getX(i+1),pos.getY(i+1),pos.getZ(i+1)),idx(pos.getX(i+2),pos.getY(i+2),pos.getZ(i+2))]);
   return new CANNON.ConvexPolyhedron({vertices:verts,faces});
 }
 
-function physicsShape(sides,mesh){
-  if(sides===6)return new CANNON.Box(new CANNON.Vec3(0.5,0.5,0.5));
-  return makeConvexShape(mesh.geometry);
+function physicsShape(sides,mesh,scale){
+  scale=scale||1;
+  if(sides===6)return new CANNON.Box(new CANNON.Vec3(0.5*scale,0.5*scale,0.5*scale));
+  return makeConvexShape(mesh.geometry,scale);
 }
 
 function getDieValue(mesh){
@@ -409,6 +411,21 @@ class CombatDiceRoller{
       }
       this.renderer.setSize(w,h,false);
     }
+    this._updateWalls();
+  }
+
+  _updateWalls(){
+    if(!this._walls||!this._walls.length)return;
+    const w=this.battleCanvas.width||800,h=this.battleCanvas.height||600;
+    const aspect=w/h;
+    const size=this._camSize||12;
+    const halfX=size*aspect-0.5; // slight inset so dice stay visually inside
+    const halfZ=size-0.5;
+    // front(−z), back(+z), left(−x), right(+x)
+    this._walls[0].position.set(0,0,-halfZ);
+    this._walls[1].position.set(0,0,halfZ);
+    this._walls[2].position.set(-halfX,0,0);
+    this._walls[3].position.set(halfX,0,0);
   }
 
   _init(){
@@ -435,10 +452,15 @@ class CombatDiceRoller{
     floor.quaternion.setFromEuler(-Math.PI/2,0,0);
     this.world.addBody(floor);
 
-    [[0,0,-6.5,[0,0,0]],[0,0,6.5,[0,Math.PI,0]],[-8,0,0,[0,Math.PI/2,0]],[8,0,0,[0,-Math.PI/2,0]]].forEach(([x,y,z,rot])=>{
+    // Walls — repositioned on resize to match camera bounds
+    this._walls=[];
+    // Order: front(−z), back(+z), left(−x), right(+x)
+    [[0,0,-1,[0,0,0]],[0,0,1,[0,Math.PI,0]],[-1,0,0,[0,Math.PI/2,0]],[1,0,0,[0,-Math.PI/2,0]]].forEach(([x,y,z,rot])=>{
       const b=new CANNON.Body({mass:0,shape:new CANNON.Plane()});
-      b.position.set(x,y,z);b.quaternion.setFromEuler(...rot);this.world.addBody(b);
+      b.quaternion.setFromEuler(...rot);this.world.addBody(b);
+      this._walls.push(b);
     });
+    this._updateWalls();
 
     const dir=new THREE.DirectionalLight(0xffffff,2.8);
     dir.position.set(4,10,6);dir.castShadow=true;
@@ -523,7 +545,7 @@ class CombatDiceRoller{
     this._rollMeta={rollId,expression,seed,shared:true};
     this._setRngSeed(seed);
     const thrower=payload?.fromGuestName||payload?.guestName||null;
-    this.roll(expression,{rollId,seed,shared:true,thrower,broadcast:false,passive:!window.__isHost});
+    this.roll(expression,{rollId,seed,shared:true,thrower,broadcast:false,passive:!window.__isHost,throwData:payload?.throwData||null});
   }
 
   getReplicationState(){
@@ -555,6 +577,7 @@ class CombatDiceRoller{
 
   applySharedState(snapshot){
     if(!snapshot)return;
+    if(window.__isHost)return; // Host is authoritative — never apply echoed state to itself
     if(this._rollMeta.rollId && snapshot.rollId && snapshot.rollId!==this._rollMeta.rollId)return;
     if(snapshot.diceSettings) this.applySettings(snapshot.diceSettings);
     if(snapshot.rollId && !this._rollMeta.rollId){
@@ -581,6 +604,8 @@ class CombatDiceRoller{
     for(const snap of diceState){
       const d=this._dice[snap.idx];
       if(!d)continue;
+      // Skip repositioning for dice that are locally simulating (DYNAMIC) — they handle their own physics
+      if(d.body.type===CANNON.Body.DYNAMIC)continue;
       if(snap.position){d.body.position.set(snap.position.x||0,snap.position.y||0,snap.position.z||0);}
       if(snap.quaternion){d.body.quaternion.set(snap.quaternion.x||0,snap.quaternion.y||0,snap.quaternion.z||0,snap.quaternion.w??1);}
       if(snap.velocity){d.body.velocity.set(snap.velocity.x||0,snap.velocity.y||0,snap.velocity.z||0);}
@@ -703,6 +728,8 @@ class CombatDiceRoller{
     const d=this._dice[this._draggedDieIdx];
     if(!d){this._draggedDieIdx=null;return;}
     d.body.type=CANNON.Body.DYNAMIC;
+    d.body.mass=1;
+    if(d.body.updateMassProperties)d.body.updateMassProperties();
     const cur=this._dragCurWorld||{wx:0,wz:0};
     const prev=this._dragPrevWorld||cur;
     const dt=Math.max(0.016,((this._dragCurTime||0)-(this._dragPrevTime||0))/1000);
@@ -721,7 +748,7 @@ class CombatDiceRoller{
     d.body.wakeUp?.();
 
     const throwData={
-      dieIndex:0,
+      dieIndex:this._draggedDieIdx,
       sides:d.sides,
       sign:d.sign||1,
       position:{x:d.body.position.x,y:d.body.position.y,z:d.body.position.z},
@@ -808,22 +835,30 @@ class CombatDiceRoller{
       body.angularVelocity.set((rand()-.5)*sp,(rand()-.5)*sp,(rand()-.5)*sp);
       body.linearDamping=0.22;body.angularDamping=0.28;body.allowSleep=true;body.sleepSpeedLimit=0.08;body.sleepTimeLimit=0.8;
     }
-    body.addShape(physicsShape(sides,mesh));
+    body.addShape(physicsShape(sides,mesh,scale));
     this.scene.add(mesh);this.world.addBody(body);
     this._dice.push({sides,mesh,body,sign,thrower:thrower||null});
   }
 
   roll(expression,opts={}){
     const passive=!!opts.passive || !window.__isHost;
+    const isThrow=!!opts.throwData;
     if(this._rolling){
       if(passive)this.clearDice();
-      else return;
+      else if(!isThrow)return;
     }
     this._rolling=true;
     const r=document.getElementById('diceResult');
     if(r){r.className='rolling';r.textContent='🎲 Rolling…';}
     const{dice,mod}=parseExpression(expression);
-    this.clearDice();
+    if(!isThrow){
+      this.clearDice();
+    } else {
+      // For throws, just reset polling state without removing existing dice
+      if(this._rollTimeout){clearTimeout(this._rollTimeout);this._rollTimeout=null;}
+      if(this._poller){clearInterval(this._poller);this._poller=null;}
+      this._pendingSharedResult=null;
+    }
     this._rolling=true;
     const resultEl=document.getElementById('diceResult');
     if(resultEl){resultEl.className='rolling';resultEl.textContent='🎲 Rolling…';}
@@ -833,18 +868,36 @@ class CombatDiceRoller{
       window.__broadcastAppMessage({type:'dice_roll_start',...this._rollMeta,throwData:opts.throwData||null,diceSettings:this.getSettings(),source:'host'});
       syncToServer();
     }
-    let idx=0;const total=dice.reduce((s,d)=>s+d.count,0);
-    for(const part of dice)for(let i=0;i<part.count;i++)this.spawnDie(part.sides,idx++,total,part.sign,this._rollMeta.thrower,{passive});
+    const total=dice.reduce((s,d)=>s+d.count,0)||this._dice.length||1;
+    // Skip spawning new dice for throws when dice already exist (the throw animates an existing die)
+    if(!isThrow || !this._dice.length){
+      let idx=0;
+      for(const part of dice)for(let i=0;i<part.count;i++)this.spawnDie(part.sides,idx++,total,part.sign,this._rollMeta.thrower,{passive});
+    }
 
     const td=opts.throwData;
-    if(td&&!passive&&this._dice.length){
+    if(td&&this._dice.length){
+      // Prefer the exact die index from the guest's drag; fall back to sides match
       let targetIdx=Number.isInteger(td.dieIndex)?Math.max(0,Math.min(this._dice.length-1,td.dieIndex)):0;
       if(Number.isFinite(td.sides)){
-        const sideMatch=this._dice.findIndex(di=>di.sides===td.sides&&((td.sign||1)<0?di.sign<0:di.sign>0));
-        if(sideMatch>=0)targetIdx=sideMatch;
+        const atIdx=this._dice[targetIdx];
+        // Only override with findIndex if the die at dieIndex doesn't match the expected sides
+        if(!atIdx || atIdx.sides!==td.sides || (atIdx.sign??1)!==(td.sign||1)){
+          const sideMatch=this._dice.findIndex(di=>di.sides===td.sides&&((td.sign||1)<0?di.sign<0:di.sign>0));
+          if(sideMatch>=0)targetIdx=sideMatch;
+        }
       }
       const target=this._dice[targetIdx];
       if(target){
+        // Ensure die is fully dynamic and awake for wall collisions
+        target.body.type=CANNON.Body.DYNAMIC;
+        target.body.mass=1;
+        if(target.body.updateMassProperties)target.body.updateMassProperties();
+        target.body.linearDamping=0.22;
+        target.body.angularDamping=0.28;
+        target.body.allowSleep=true;
+        target.body.sleepSpeedLimit=0.08;
+        target.body.sleepTimeLimit=0.8;
         if(td.position&&Number.isFinite(td.position.x)&&Number.isFinite(td.position.y)&&Number.isFinite(td.position.z)){
           target.body.position.set(td.position.x,td.position.y,td.position.z);
         }
@@ -924,7 +977,7 @@ class CombatDiceRoller{
     }
 
     this._lastMod=mod;
-    const payload={rollId:this._rollMeta.rollId,expression,mod,total,results,shared:!!this._rollMeta.shared,diceState:this.getReplicationState()};
+    const payload={rollId:this._rollMeta.rollId,expression,mod,total,results,shared:!!this._rollMeta.shared,thrower:this._rollMeta.thrower||null,diceState:this.getReplicationState()};
     this._rolling=false;
     this._pendingSharedResult={results,total,mod,rollId:this._rollMeta.rollId};
     document.dispatchEvent(new CustomEvent('dice-result',{detail:payload}));

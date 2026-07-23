@@ -6,8 +6,11 @@ const path = require('path');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
-app.get('/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'lobby.html')));
+const publicDir = path.join(__dirname, '..', 'public');
+const sendLobby = (_req, res) => res.sendFile(path.join(publicDir, 'lobby.html'));
+app.get(['/', '/lobby'], sendLobby);
+app.get('/combat', (_req, res) => res.sendFile(path.join(publicDir, 'combat', 'index.html')));
+app.use(express.static(publicDir));
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');

@@ -175,6 +175,10 @@
       return value.replace(/\/+$/, '');
     }
 
+    function browserLobbyUrl(raw) {
+      return `${normalizeServerUrl(raw)}/lobby.html`;
+    }
+
     function openCombatInBrowser({ mode, name, room, serverUrl }) {
       const wsUrl = serverUrl.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
       const params = new URLSearchParams({ mode, name, room, ws: wsUrl });
@@ -202,7 +206,7 @@
         runtimeBox.style.display = 'block';
         const pieces = [];
         pieces.push(`Relay: ${info?.relayUrl || 'starting…'}`);
-        if (info?.tunnelUrl) pieces.push(`Public: ${info.tunnelUrl}`);
+        if (info?.tunnelUrl) pieces.push(`Invite: ${browserLobbyUrl(info.tunnelUrl)}`);
         else if (info?.tunnelError) pieces.push(`Tunnel: ${info.tunnelError}`);
         else pieces.push('Public tunnel: not active');
         runtimeText.textContent = pieces.join(' • ');
@@ -280,7 +284,7 @@
       saveSettings();
       const serverUrl = normalizeServerUrl(latestRuntime?.tunnelUrl || $('joinServerUrl').value || $('serverUrl').value);
       const room = $('roomCodeInput').value.trim().toUpperCase() || 'ROOMCODE';
-      const text = `Server: ${serverUrl}\nRoom: ${room}`;
+      const text = `Open: ${browserLobbyUrl(serverUrl)}\nRoom: ${room}`;
       try {
         await navigator.clipboard.writeText(text);
         setStatus('Invite text copied.', 'ok');

@@ -193,6 +193,10 @@ function requiresCmdShell(binaryPath) {
   return ext === '.cmd' || ext === '.bat';
 }
 
+function toBrowserLobbyUrl(baseUrl) {
+  return `${String(baseUrl || '').replace(/\/+$/, '')}/lobby.html`;
+}
+
 function openCombatWindow({ mode, name, room, serverUrl }) {
   const win = new BrowserWindow({
     width: 1600,
@@ -271,7 +275,8 @@ ipcMain.handle('session:create', async (_evt, payload) => {
   const data = await createRoom(serverUrl, name);
   const roomCode = data?.room?.code;
   if (!roomCode) throw new Error('Server did not return a room code.');
-  const publicUrl = await maybeStartTunnel();
+  const tunnelBaseUrl = await maybeStartTunnel();
+  const publicUrl = tunnelBaseUrl ? toBrowserLobbyUrl(tunnelBaseUrl) : null;
   openCombatWindow({ mode: 'host', name, room: roomCode, serverUrl });
   broadcastRuntimeUpdate();
   return { ok: true, room: data.room, serverUrl, publicUrl, runtime: { ...runtimeInfo } };

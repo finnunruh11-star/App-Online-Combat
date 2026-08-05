@@ -59,6 +59,7 @@ function defaultGameState() {
     participants: [],
     objects: [],
     turnIndex: 0,
+    roundNumber: 0,
     canvasWidth: 900,
     canvasHeight: 700,
     pixelsPerUnit: 20,
@@ -69,6 +70,8 @@ function defaultGameState() {
     guestDiceEnabled: false,
     guestDiceThrowEnabled: false,
     guestFreeMoveEnabled: false,
+    guestEndTurnEnabled: false,
+    guestVitalsEnabled: false,
     initiativeDisplayOrder: 'initiative',
     diceSettings: defaultDiceSettings(),
     diceState: null,
@@ -118,6 +121,77 @@ function clampCharge(value) {
   return Math.max(0, Math.min(MAX_CHARGES, n));
 }
 
+function isOwnedByGuest(participant, guestName, participants) {
+  if (!participant) return false;
+  const owner = participant.ownerId
+    ? participants.find(candidate => candidate.id === participant.ownerId)
+    : participant;
+  return !!owner && isAssignedTo(owner, guestName);
+}
+
+function applyTurnChargeGain(participant, phase) {
+  if (!participant) return;
+  const key = phase === 'start' ? 'chargesTurnStartAdd' : 'chargesTurnEndAdd';
+  participant.charges = clampCharge(clampCharge(participant.charges) + clampCharge(participant[key]));
+}
+
+function advanceRoomTurn(room) {
+  const participants = room.state.participants;
+  if (!participants.length) return false;
+  const previous = participants[room.state.turnIndex];
+  if (previous) {
+    previous.movedUnits = 0;
+    applyTurnChargeGain(previous, 'end');
+    participants.filter(p => p.ownerId === previous.id).forEach(p => { p.movedUnits = 0; });
+  }
+  let nextIndex = (room.state.turnIndex + 1) % participants.length;
+  let remaining = participants.length;
+  while (participants[nextIndex]?.ownerId && remaining-- > 0) {
+    nextIndex = (nextIndex + 1) % participants.length;
+  }
+  if (nextIndex <= room.state.turnIndex) room.state.roundNumber = Math.max(1, (Number(room.state.roundNumber) || 0) + 1);
+  room.state.turnIndex = nextIndex;
+  const next = participants[nextIndex];
+  if (next) {
+    next.movedUnits = 0;
+    applyTurnChargeGain(next, 'start');
+    participants.filter(p => p.ownerId === next.id).forEach(p => { p.movedUnits = 0; });
+  }
+  return true;
+}
+
+function normalizeMovePath(participant, msg, state) {
+  const radius = participant.radius || 15;
+  const rawPoints = Array.isArray(msg.path) && msg.path.length ? msg.path : [msg.target];
+  const points = [{ x: participant.x, y: participant.y }];
+  for (const raw of rawPoints.slice(0, 500)) {
+    const rawX = Number(raw?.x);
+    const rawY = Number(raw?.y);
+    if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) continue;
+    const point = {
+      x: Math.max(radius, Math.min(state.canvasWidth - radius, rawX)),
+      y: Math.max(radius, Math.min(state.canvasHeight - radius, rawY)),
+    };
+    const previous = points[points.length - 1];
+    if (Math.hypot(point.x - previous.x, point.y - previous.y) >= 0.5) points.push(point);
+  }
+  return points.length > 1 ? points : null;
+}
+
+function movePathDistanceUnits(path, participant, pixelsPerUnit) {
+  let pixels = 0;
+  for (let index = 1; index < path.length; index += 1) {
+    pixels += Math.hypot(path[index].x - path[index - 1].x, path[index].y - path[index - 1].y);
+  }
+  return Math.max(0, pixels - (participant.radius || 15)) / pixelsPerUnit;
+}
+
+function broadcastParticipantMove(room, participantId, path) {
+  const message = { type: 'participant_moved', participantId, path };
+  broadcastToGuests(room, message);
+  sendToHost(room, message);
+}
+
 function roomSnapshot(room) {
   return {
     code: room.code,
@@ -145,6 +219,7 @@ function maskStateForGuest(room, guestName) {
       publicDisplayName: p.type === 'player' ? p.name : null,
       movedUnits: p.movedUnits || 0,
       speed: p.speed || 0,
+      extraMoveUnits: Math.max(0, Number(p.extraMoveUnits) || 0),
       hp: (p.type === 'player' || p.ownerId) ? p.hp : undefined,
       maxHp: (p.type === 'player' || p.ownerId) ? p.maxHp : undefined,
       charges: p.type === 'player' ? clampCharge(p.charges) : undefined,
@@ -165,6 +240,7 @@ function maskStateForGuest(room, guestName) {
     })),
     objects: room.state.objects,
     turnIndex: room.state.turnIndex,
+    roundNumber: room.state.roundNumber,
     publicTurnName: current ? (current.type === 'player' ? current.name : 'Enemy Turn') : null,
     canvasWidth: room.state.canvasWidth,
     canvasHeight: room.state.canvasHeight,
@@ -174,6 +250,8 @@ function maskStateForGuest(room, guestName) {
     guestDiceEnabled: room.state.guestDiceEnabled,
     guestDiceThrowEnabled: room.state.guestDiceThrowEnabled,
     guestFreeMoveEnabled: room.state.guestFreeMoveEnabled,
+    guestEndTurnEnabled: room.state.guestEndTurnEnabled,
+    guestVitalsEnabled: room.state.guestVitalsEnabled,
     initiativeDisplayOrder: room.state.initiativeDisplayOrder,
     diceSettings: room.state.diceSettings,
     latestDicePrompt: room.state.latestDicePrompt,
@@ -239,9 +317,10 @@ function scheduleCleanup(room) {
 function updateStateFromHost(room, msg) {
   const src = msg.state && typeof msg.state === 'object' ? msg.state : msg;
   const keys = [
-    'participants', 'objects', 'turnIndex', 'canvasWidth', 'canvasHeight', 'pixelsPerUnit',
+    'participants', 'objects', 'turnIndex', 'roundNumber', 'canvasWidth', 'canvasHeight', 'pixelsPerUnit',
     'moveToleranceUnits', 'autoApproveIfWithinTolerance', 'guestDrawEnabled', 'guestInitiativeEnabled',
     'guestDiceEnabled', 'guestDiceThrowEnabled', 'guestFreeMoveEnabled', 'initiativeDisplayOrder', 'diceSettings',
+    'guestEndTurnEnabled', 'guestVitalsEnabled',
     'diceState', 'latestDicePrompt', 'bagItems', 'bagWeightMultipliers',
     'customEmotes', 'customEnemyEmotes',
     'backgroundImageSrc', 'backgroundFillMode', 'overlayImageSrc',
@@ -608,7 +687,7 @@ wss.on('connection', ws => {
           ws.send(JSON.stringify({ type: 'guest_end_turn_result', ok: false, reason: 'participant_not_found' }));
           return;
         }
-        if (p.assignedTo && !isAssignedTo(p, ws.name)) {
+        if (!isOwnedByGuest(p, ws.name, room.state.participants)) {
           ws.send(JSON.stringify({ type: 'guest_end_turn_result', ok: false, reason: 'not_your_token' }));
           return;
         }
@@ -617,8 +696,40 @@ wss.on('connection', ws => {
           ws.send(JSON.stringify({ type: 'guest_end_turn_result', ok: false, reason: 'not_your_turn' }));
           return;
         }
-        sendToHost(room, { type: 'guest_end_turn_request', participantId: p.id, fromGuestName: ws.name || 'Guest' });
-        ws.send(JSON.stringify({ type: 'guest_end_turn_result', ok: true, queued: true }));
+        if (!room.state.guestEndTurnEnabled) {
+          ws.send(JSON.stringify({ type: 'guest_end_turn_result', ok: false, reason: 'permission_disabled' }));
+          return;
+        }
+        advanceRoomTurn(room);
+        broadcastGuestState(room);
+        sendToHost(room, { type: 'state_echo', state: room.state });
+        sendToHost(room, { type: 'turn_advanced_by_guest', participantId: p.id, fromGuestName: ws.name || 'Guest' });
+        ws.send(JSON.stringify({ type: 'guest_end_turn_result', ok: true, advanced: true }));
+        return;
+      }
+
+      if (msg.type === 'guest_vitals_update' && ws.mode === 'guest') {
+        if (!room.state.guestVitalsEnabled) {
+          ws.send(JSON.stringify({ type: 'guest_vitals_update_result', ok: false, reason: 'permission_disabled' }));
+          return;
+        }
+        const p = room.state.participants.find(pp => pp.id === msg.participantId);
+        if (!p || !isOwnedByGuest(p, ws.name, room.state.participants)) {
+          ws.send(JSON.stringify({ type: 'guest_vitals_update_result', ok: false, reason: p ? 'not_your_token' : 'participant_not_found' }));
+          return;
+        }
+        const amount = Number.parseInt(msg.amount, 10);
+        if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
+          ws.send(JSON.stringify({ type: 'guest_vitals_update_result', ok: false, reason: 'bad_amount' }));
+          return;
+        }
+        const before = Number.isFinite(Number(p.hp)) ? Number(p.hp) : 0;
+        const maximum = Number.isFinite(Number(p.maxHp)) ? Math.max(0, Number(p.maxHp)) : Number.POSITIVE_INFINITY;
+        const delta = msg.operation === 'heal' ? amount : -amount;
+        p.hp = Math.max(0, Math.min(maximum, before + delta));
+        broadcastGuestState(room);
+        sendToHost(room, { type: 'state_echo', state: room.state });
+        ws.send(JSON.stringify({ type: 'guest_vitals_update_result', ok: true, before, after: p.hp }));
         return;
       }
 
@@ -633,11 +744,11 @@ wss.on('connection', ws => {
           ? room.state.participants.find(pp => pp.id === p.ownerId)
           : p;
         const assignedTarget = effectiveOwner || p;
-        if (assignedTarget.assignedTo && !isAssignedTo(assignedTarget, ws.name)) {
+        if (!isAssignedTo(assignedTarget, ws.name)) {
           ws.send(JSON.stringify({ type: 'request_result', ok: false, reason: 'not_your_token' }));
           return;
         }
-        if (assignedTarget.assignedTo) {
+        if (assignedTarget.assignedTo && !room.state.guestFreeMoveEnabled) {
           const turnP = room.state.participants[room.state.turnIndex];
           if (!turnP || (turnP.id !== assignedTarget.id && turnP.id !== p.id)) {
             ws.send(JSON.stringify({ type: 'request_result', ok: false, reason: 'not_your_turn' }));
@@ -645,19 +756,21 @@ wss.on('connection', ws => {
           }
         }
 
-        const dx = msg.target.x - p.x;
-        const dy = msg.target.y - p.y;
-        const centerDist = Math.sqrt(dx * dx + dy * dy);
-        const edgeDist = Math.max(0, centerDist - (p.radius || 15));
-        const distUnits = edgeDist / room.state.pixelsPerUnit;
-        const extraUnits = msg.extraUnits || 0;
+        const path = normalizeMovePath(p, msg, room.state);
+        if (!path) {
+          ws.send(JSON.stringify({ type: 'request_result', ok: false, reason: 'bad_path' }));
+          return;
+        }
+        const target = path[path.length - 1];
+        const distUnits = movePathDistanceUnits(path, p, room.state.pixelsPerUnit);
+        const extraUnits = Math.max(0, Number(p.extraMoveUnits) || 0);
         const movedSoFar = p.movedUnits || 0;
-        const remaining = Math.max(0, (p.speed || 0) - movedSoFar);
-        const allowedThisMove = remaining + extraUnits;
+        const baseRemaining = Math.max(0, (p.speed || 0) - movedSoFar);
+        const allowedThisMove = Math.max(0, (p.speed || 0) + extraUnits - movedSoFar);
 
         if ((room.state.autoApproveIfWithinTolerance && distUnits <= allowedThisMove + room.state.moveToleranceUnits) || room.state.guestFreeMoveEnabled) {
-          p.x = msg.target.x;
-          p.y = msg.target.y;
+          p.x = target.x;
+          p.y = target.y;
           p.movedUnits = movedSoFar + distUnits;
           p.emoteKey = null;
           p.emoteUntil = null;
@@ -666,7 +779,8 @@ wss.on('connection', ws => {
           p.emoteScale = 1;
           broadcastGuestState(room);
           sendToHost(room, { type: 'state_echo', state: room.state });
-          ws.send(JSON.stringify({ type: 'request_result', ok: true, autoApproved: true, reason: room.state.guestFreeMoveEnabled ? 'guest_free_move_enabled' : 'tolerance', newPos: { x: p.x, y: p.y } }));
+          broadcastParticipantMove(room, p.id, path);
+          ws.send(JSON.stringify({ type: 'request_result', ok: true, autoApproved: true, reason: room.state.guestFreeMoveEnabled ? 'guest_free_move_enabled' : 'tolerance', newPos: { x: p.x, y: p.y }, path }));
           return;
         }
 
@@ -675,10 +789,12 @@ wss.on('connection', ws => {
           fromGuestName: ws.name || 'Guest',
           participantId: p.id,
           participantName: p.name,
-          target: msg.target,
+          target,
+          path,
           extraUnits,
           distUnits,
-          remaining,
+          remaining: allowedThisMove,
+          baseRemaining,
           allowedUnits: allowedThisMove,
           timestamp: Date.now(),
           requestType: 'move',
@@ -722,7 +838,8 @@ wss.on('connection', ws => {
           }
           broadcastGuestState(room);
           sendToHost(room, { type: 'state_echo', state: room.state });
-          broadcastToGuests(room, { type: 'request_resolved', requestId: req.id, approved: true, participantId: req.participantId, newPos: req.target });
+          broadcastParticipantMove(room, req.participantId, req.path || [req.target]);
+          broadcastToGuests(room, { type: 'request_resolved', requestId: req.id, approved: true, participantId: req.participantId, newPos: req.target, path: req.path });
         } else {
           broadcastToGuests(room, { type: 'request_resolved', requestId: req.id, approved: false, participantId: req.participantId });
         }

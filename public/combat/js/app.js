@@ -204,6 +204,7 @@ let pendingInitiativeUpdate = false;
 let participants=[], objects=[], turnIndex=0, pixelsPerUnit=20;
 let backgroundImageSrc='', backgroundFillMode='stretch', backgroundImageEl=null;
 let guestDrawEnabled=false, guestInitiativeEnabled=false, guestDiceEnabled=false, guestDiceThrowEnabled=false, guestFreeMoveEnabled=false;
+let guestEndTurnEnabled=false, guestVitalsEnabled=false;
 let initiativeDisplayOrder='initiative'; // 'initiative' | 'alpha'
 let roundNumber=0;
 let bagItems=[];
@@ -228,11 +229,12 @@ const INVENTORY_SLOT_DEFS=[
 const INVENTORY_SLOT_IDS=INVENTORY_SLOT_DEFS.map(s=>s.id);
 let bagWeightMultipliers={fin:0,nad:0,kat:0};
 // host
-let activeParticipant=null, selectedObject=null, selectedObjects=[];
+let activeParticipant=null, selectedParticipants=[], selectedObject=null, selectedObjects=[];
 let drawMode=false, drawTool='freehand', isDrawing=false, currentDrawing=null;
 let drawBrushSize=2, drawStrokeColor='#6366f1';
 let hostFreeMoveMode=false; // drag tokens/objects without movespeed cost
 let draggingParticipantRef=null, participantDragOffset={x:0,y:0}; // for free-move drag
+let participantDragInitial=null, participantClipboard=[], participantPasteCount=0;
 let draggingDie=false; // physically throwing a 3D die
 let measuring=null, moveConfig=false, moveHistory=[];
 let selectionRect=null, selecting=false, isMouseDown=false, mouseDownPos=null;
@@ -241,6 +243,7 @@ let connectedGuests=[], editingParticipant=null;
 let canvasSpawnPos={x:0,y:0}; // position for right-click entity spawn
 // guest
 let localSelection=null, lastTargetPos=null, imgCache={}, avatarCache={};
+let guestMovePath=null, guestPathDrawing=false;
 let guestIsDrawing=false, guestCurrentDrawing=null, guestMeasuring=null;
 let guestBrushSize=2, guestStrokeColor='#818cf8', guestActiveTab='main';
 let mobileToolMode=null, mobileZoom=1, mobilePinch=null, mobilePan=null, mobilePingIndex=null;
@@ -278,22 +281,8 @@ const selectedObjectLabel=document.getElementById('selectedObjectLabel'), delete
 const backgroundUploadEl=document.getElementById('backgroundUpload'), backgroundFillModeEl=document.getElementById('backgroundFillMode'), clearBackgroundBtn=document.getElementById('clearBackground');
 const imageUpload=document.getElementById('imageUpload'), guestDrawToggle=document.getElementById('guestDrawToggle');
 const guestDiceToggle=document.getElementById('guestDiceToggle'), guestDiceThrowToggle=document.getElementById('guestDiceThrowToggle');
-// Inject the free-move toggle adjacent to the dice-throw toggle in the host settings panel.
-// Done here so the const below can find it via getElementById like all other toggles.
-(() => {
-  const ref = document.getElementById('guestDiceThrowToggle');
-  if (ref && !document.getElementById('guestFreeMoveToggle')) {
-    const container = ref.closest('label') || ref.parentElement;
-    if (container) {
-      const label = document.createElement('label');
-      label.className = container.className || '';
-      label.title = 'Allow guests to move tokens beyond their speed limit without DM approval';
-      label.innerHTML = '<input type="checkbox" id="guestFreeMoveToggle"> Guests move freely (no speed limit)';
-      container.insertAdjacentElement('afterend', label);
-    }
-  }
-})();
 const guestFreeMoveToggle = document.getElementById('guestFreeMoveToggle');
+const guestEndTurnToggle=document.getElementById('guestEndTurnToggle'), guestVitalsToggle=document.getElementById('guestVitalsToggle'), playerManagedPreset=document.getElementById('playerManagedPreset');
 const guestInitiativeToggle=document.getElementById('guestInitiativeToggle');
 const manualCircleUnitsEl=document.getElementById('manualCircleUnits'), showManualCircleBtn=document.getElementById('showManualCircle');
 const newPortraitPreview=document.getElementById('newPortraitPreview'), newPortraitBtn=document.getElementById('newPortraitBtn'), clearNewPortraitBtn=document.getElementById('clearNewPortrait'), newPortraitFile=document.getElementById('newPortraitFile');
@@ -307,6 +296,9 @@ const pendingList=document.getElementById('pendingList'), guestListEl=document.g
 const guestSelectedInfo=document.getElementById('guestSelectedInfo'), guestTargetInfo=document.getElementById('guestTargetInfo');
 const guestExtraEl=document.getElementById('guestExtra'), guestRequestMoveBtn=document.getElementById('guestRequestMove'), guestClearTargetBtn=document.getElementById('guestClearTarget'), guestMoveStatus=document.getElementById('guestMoveStatus');
 const guestEndTurnBtn=document.getElementById('guestEndTurn');
+const guestMovementModeEl=document.getElementById('guestMovementMode');
+const guestVitalsControls=document.getElementById('guestVitalsControls'), guestHpAmount=document.getElementById('guestHpAmount'), guestDamageBtn=document.getElementById('guestDamageBtn'), guestHealBtn=document.getElementById('guestHealBtn'), guestVitalsStatus=document.getElementById('guestVitalsStatus');
+const bulkHpAmount=document.getElementById('bulkHpAmount'), bulkDamageBtn=document.getElementById('bulkDamageBtn'), bulkHealBtn=document.getElementById('bulkHealBtn'), bulkHpStatus=document.getElementById('bulkHpStatus');
 const guestChargesDecreaseBtn=document.getElementById('guestChargesDecrease'), guestChargesIncreaseBtn=document.getElementById('guestChargesIncrease');
 const guestChargeStartGainEl=document.getElementById('guestChargeStartGain'), guestChargeEndGainEl=document.getElementById('guestChargeEndGain'), guestApplyChargeGainsBtn=document.getElementById('guestApplyChargeGains');
 const guestChargeAnnounceToggle=document.getElementById('guestChargeAnnounceToggle'), guestChargeStatusEl=document.getElementById('guestChargeStatus');
@@ -393,6 +385,7 @@ function clampChargeGain(v){
 }
 function ensureParticipantChargeFields(p){
   if(!p)return p;
+  p.extraMoveUnits=Math.max(0,Number(p.extraMoveUnits)||0);
   p.maxCharges=MAX_CHARGES;
   p.charges=clampChargeValue(p.charges);
   p.chargesTurnStartAdd=clampChargeGain(p.chargesTurnStartAdd);
@@ -592,9 +585,13 @@ function refreshGuestChargeControls(){
   if(guestChargesIncreaseBtn)guestChargesIncreaseBtn.disabled=!canEdit;
   if(guestApplyChargeGainsBtn)guestApplyChargeGainsBtn.disabled=!canEdit;
   if(guestEndTurnBtn){
-    guestEndTurnBtn.disabled=!isMyTurn;
-    guestEndTurnBtn.textContent=isMyTurn?'⏭ End My Turn':'⏭ End My Turn (wait)';
+    guestEndTurnBtn.disabled=!guestEndTurnEnabled||!isMyTurn;
+    guestEndTurnBtn.textContent=!guestEndTurnEnabled?'⏭ End Turn (DM disabled)':isMyTurn?'⏭ End My Turn':'⏭ End My Turn (wait)';
   }
+  if(guestVitalsControls)guestVitalsControls.style.display=guestVitalsEnabled?'block':'none';
+  if(guestDamageBtn)guestDamageBtn.disabled=!guestVitalsEnabled||!canEdit;
+  if(guestHealBtn)guestHealBtn.disabled=!guestVitalsEnabled||!canEdit;
+  if(guestExtraEl)guestExtraEl.value=canEdit?String(Math.max(0,Number(p.extraMoveUnits)||0)):'0';
   if(canEdit){
     ensureParticipantChargeFields(p);
     if(document.activeElement!==guestChargeStartGainEl)guestChargeStartGainEl.value=String(p.chargesTurnStartAdd||0);
@@ -603,6 +600,13 @@ function refreshGuestChargeControls(){
     if(document.activeElement!==guestChargeStartGainEl)guestChargeStartGainEl.value='';
     if(document.activeElement!==guestChargeEndGainEl)guestChargeEndGainEl.value='';
   }
+}
+function updatePlayerManagedPreset(){
+  if(!playerManagedPreset)return;
+  const toggles=[guestEndTurnToggle,guestVitalsToggle,guestDiceToggle,cfgAutoApprove].filter(Boolean);
+  const enabledCount=toggles.filter(toggle=>toggle.checked).length;
+  playerManagedPreset.checked=toggles.length>0&&enabledCount===toggles.length;
+  playerManagedPreset.indeterminate=enabledCount>0&&enabledCount<toggles.length;
 }
 let _confirmCb=null;
 function showConfirm(msg,onOk,onCancel){
@@ -1083,6 +1087,10 @@ function handleMessage(msg) {
   if (msg.type==='host_ack'&&isHost){applyHostState(msg.state);updatePendingList(msg.pendingRequests||[]);drawAll();return;}
   if (msg.type==='state_echo'&&isHost){applyHostState(msg.state);drawAll();return;}
   if (msg.type==='guest_state'&&!isHost){applyGuestState(msg.state);return;}
+  if(msg.type==='participant_moved'){
+    animateParticipantPath(msg.participantId,msg.path);
+    return;
+  }
   if (msg.type==='map_ping'){
     if(!rememberPingId(msg.pingId))return;
     addPingEffect(msg.x,msg.y,msg.pingIndex,msg.label,msg.fromName);
@@ -1203,7 +1211,7 @@ if (msg.type === 'dice_roll_result') {
   if (msg.type==='request_result'&&!isHost){
     const s=guestMoveStatus;
     if(msg.ok===true){s.textContent='✅ Move approved!';s.style.color='var(--success)';}
-    else if(msg.ok===false){const r={not_your_token:"That's not your token.",not_your_turn:"It's not your turn.",participant_not_found:"Token not found."};s.textContent='❌ '+(r[msg.reason]||'Move rejected.');s.style.color='var(--danger)';}
+    else if(msg.ok===false){const r={not_your_token:"That's not your token.",not_your_turn:"It's not your turn.",participant_not_found:"Token not found.",bad_path:'Draw a valid movement path.'};s.textContent='❌ '+(r[msg.reason]||'Move rejected.');s.style.color='var(--danger)';}
     else if(msg.queued){s.textContent='⏳ Waiting for DM approval…';s.style.color='var(--accent2)';}
     setTimeout(()=>{s.textContent='';},5000);return;
   }
@@ -1225,15 +1233,30 @@ if (msg.type === 'dice_roll_result') {
   }
   if(msg.type==='guest_end_turn_result'&&!isHost){
     if(msg.ok===true){
-      guestMoveStatus.textContent='⏭ End turn request sent.';
-      guestMoveStatus.style.color='var(--accent2)';
+      guestMoveStatus.textContent='⏭ Turn ended.';
+      guestMoveStatus.style.color='var(--success)';
     }else{
-      const r={not_your_token:"That's not your token.",not_your_turn:"It's not your turn.",participant_not_found:'Token not found.'};
+      const r={not_your_token:"That's not your token.",not_your_turn:"It's not your turn.",participant_not_found:'Token not found.',permission_disabled:'The DM has not enabled player turn ending.'};
       guestMoveStatus.textContent='❌ '+(r[msg.reason]||'Could not end turn.');
       guestMoveStatus.style.color='var(--danger)';
     }
     setTimeout(()=>{guestMoveStatus.textContent='';},4000);
     refreshGuestChargeControls();
+    return;
+  }
+  if(msg.type==='guest_vitals_update_result'&&!isHost){
+    if(guestVitalsStatus){
+      guestVitalsStatus.textContent=msg.ok===true?`HP: ${msg.before} → ${msg.after}`:'HP update rejected.';
+      guestVitalsStatus.style.color=msg.ok===true?'var(--success)':'var(--danger)';
+      setTimeout(()=>{guestVitalsStatus.textContent='';},4000);
+    }
+    return;
+  }
+  if(msg.type==='turn_advanced_by_guest'&&isHost){
+    activeParticipant=participants[turnIndex]||null;
+    checkRemindersForTurn(turnIndex);
+    refreshHpControls();updateInitiativeList();drawAll();
+    if(msg.fromGuestName)showAlert(`⏭ ${msg.fromGuestName} ended their turn.`);
     return;
   }
   if(msg.type==='guest_end_turn_request'&&isHost){
@@ -1283,6 +1306,7 @@ function applyHostState(state) {
   if(state.participants!==undefined)applyParticipantsWithMotion(state.participants);
   if(state.objects!==undefined)objects=deserializeObjects(state.objects);
   if(state.turnIndex!==undefined)turnIndex=state.turnIndex;
+  if(state.roundNumber!==undefined)roundNumber=state.roundNumber;
   if(state.pixelsPerUnit!==undefined){pixelsPerUnit=state.pixelsPerUnit;cfgPixelsPerUnit.value=pixelsPerUnit;}
   if(state.canvasWidth&&state.canvasHeight){canvas.width=state.canvasWidth;canvas.height=state.canvasHeight;battleWidthEl.value=state.canvasWidth;battleHeightEl.value=state.canvasHeight;}
   if(state.moveToleranceUnits!==undefined)cfgTolerance.value=state.moveToleranceUnits;
@@ -1299,6 +1323,9 @@ function applyHostState(state) {
   if(state.guestDiceEnabled!==undefined){guestDiceEnabled=state.guestDiceEnabled;if(guestDiceToggle)guestDiceToggle.checked=guestDiceEnabled;}
   if(state.guestDiceThrowEnabled!==undefined){guestDiceThrowEnabled=state.guestDiceThrowEnabled;if(guestDiceThrowToggle)guestDiceThrowToggle.checked=guestDiceThrowEnabled;}
   if(state.guestFreeMoveEnabled!==undefined){guestFreeMoveEnabled=state.guestFreeMoveEnabled;if(guestFreeMoveToggle)guestFreeMoveToggle.checked=guestFreeMoveEnabled;}
+  if(state.guestEndTurnEnabled!==undefined){guestEndTurnEnabled=state.guestEndTurnEnabled;if(guestEndTurnToggle)guestEndTurnToggle.checked=guestEndTurnEnabled;}
+  if(state.guestVitalsEnabled!==undefined){guestVitalsEnabled=state.guestVitalsEnabled;if(guestVitalsToggle)guestVitalsToggle.checked=guestVitalsEnabled;}
+  updatePlayerManagedPreset();
   if(state.guestInitiativeEnabled!==undefined){guestInitiativeEnabled=state.guestInitiativeEnabled;if(guestInitiativeToggle)guestInitiativeToggle.checked=guestInitiativeEnabled;}
   if(state.initiativeDisplayOrder!==undefined){
     initiativeDisplayOrder=state.initiativeDisplayOrder;
@@ -1334,6 +1361,7 @@ function applyGuestState(state) {
   applyParticipantsWithMotion(state.participants||[]);
   objects=deserializeObjects(state.objects||[]);
   turnIndex=state.turnIndex||0;
+  if(state.roundNumber!==undefined)roundNumber=state.roundNumber;
   if(state.pixelsPerUnit)pixelsPerUnit=state.pixelsPerUnit;
   if(state.canvasWidth&&state.canvasHeight){canvas.width=state.canvasWidth;canvas.height=state.canvasHeight;}
   if(state.backgroundImageSrc!==undefined){
@@ -1362,10 +1390,12 @@ function applyGuestState(state) {
   if(state.guestDiceEnabled!==undefined){
     guestDiceEnabled=state.guestDiceEnabled;
     guestDiceThrowEnabled=state.guestDiceThrowEnabled||false;
-    guestFreeMoveEnabled=state.guestFreeMoveEnabled||false;
     updateGuestDicePanel();
     document.getElementById('guestControls')?.style && (document.getElementById('guestControls').style.display='flex');
   }
+  if(state.guestFreeMoveEnabled!==undefined)guestFreeMoveEnabled=!!state.guestFreeMoveEnabled;
+  if(state.guestEndTurnEnabled!==undefined)guestEndTurnEnabled=!!state.guestEndTurnEnabled;
+  if(state.guestVitalsEnabled!==undefined)guestVitalsEnabled=!!state.guestVitalsEnabled;
   if(state.guestInitiativeEnabled!==undefined){
     guestInitiativeEnabled=!!state.guestInitiativeEnabled;
   }
@@ -1438,12 +1468,35 @@ function animateParticipantMove(id,fromX,fromY,toX,toY,duration=1000){
   startAnimLoop();
 }
 
+function animateParticipantPath(id,path){
+  if(!Array.isArray(path)||path.length<2)return;
+  const points=path.map(point=>({x:Number(point.x),y:Number(point.y)})).filter(point=>Number.isFinite(point.x)&&Number.isFinite(point.y));
+  if(points.length<2)return;
+  const cumulative=[0];
+  for(let index=1;index<points.length;index++)cumulative.push(cumulative[index-1]+Math.hypot(points[index].x-points[index-1].x,points[index].y-points[index-1].y));
+  const total=cumulative[cumulative.length-1];
+  if(total<=0)return;
+  const participant=participants.find(p=>p.id===id);
+  if(participant)setPlayerFacingFromMove(participant,points[0].x,points[points.length-1].x);
+  movementAnimations.set(id,{start:performance.now(),duration:Math.max(700,Math.min(3000,total*4)),path:points,cumulative,total});
+  startAnimLoop();
+}
+
 function getParticipantDrawPos(p,now=performance.now()){
   const anim=movementAnimations.get(p.id);
   if(!anim)return {x:p.x,y:p.y};
   const t=Math.max(0,Math.min(1,(now-anim.start)/anim.duration));
   if(t>=1){movementAnimations.delete(p.id);return {x:p.x,y:p.y};}
   const e=easeInOutCubic(t);
+  if(anim.path){
+    const distance=e*anim.total;
+    let index=1;
+    while(index<anim.cumulative.length-1&&anim.cumulative[index]<distance)index++;
+    const from=anim.path[index-1],to=anim.path[index];
+    const segmentLength=anim.cumulative[index]-anim.cumulative[index-1]||1;
+    const segmentT=(distance-anim.cumulative[index-1])/segmentLength;
+    return {x:from.x+(to.x-from.x)*segmentT,y:from.y+(to.y-from.y)*segmentT};
+  }
   return {x:anim.fromX+(anim.toX-anim.fromX)*e,y:anim.fromY+(anim.toY-anim.fromY)*e};
 }
 
@@ -1453,7 +1506,7 @@ function getParticipantDrawPos(p,now=performance.now()){
 function syncToServer(){
   if(!isHost)return;
   send({type:'host_full_update',participants:participants.map(p=>({...p})),objects:serializeObjects(objects),
-    turnIndex,canvasWidth:canvas.width,canvasHeight:canvas.height,pixelsPerUnit,
+    turnIndex,roundNumber,canvasWidth:canvas.width,canvasHeight:canvas.height,pixelsPerUnit,
     backgroundImageSrc,backgroundFillMode,
     moveToleranceUnits:parseFloat(cfgTolerance.value)||0.25,
     autoApproveIfWithinTolerance:cfgAutoApprove.checked,
@@ -1461,6 +1514,8 @@ function syncToServer(){
     guestDiceEnabled:guestDiceToggle.checked,
     guestDiceThrowEnabled:guestDiceThrowToggle.checked,
     guestFreeMoveEnabled:guestFreeMoveToggle?.checked||false,
+    guestEndTurnEnabled:guestEndTurnToggle?.checked||false,
+    guestVitalsEnabled:guestVitalsToggle?.checked||false,
     guestInitiativeEnabled:guestInitiativeToggle?!!guestInitiativeToggle.checked:true,
     initiativeDisplayOrder,
     diceSettings:window.combatDice?.getSettings?.()||clampDiceSettings(),
@@ -1772,6 +1827,7 @@ if(isHost){
   document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>switchTab(b.dataset.tab)));
   window.addEventListener('keydown',e=>{
     const t=document.activeElement.tagName;if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA')return;
+    if(e.ctrlKey||e.metaKey)return;
     if(e.key==='c'||e.key==='C'){e.preventDefault();switchTab('control');}
     if(e.key==='m'||e.key==='M'){e.preventDefault();switchTab('map');}
     if(e.key==='d'||e.key==='D'){e.preventDefault();switchTab('draw');}
@@ -1856,6 +1912,22 @@ if(isHost){
   hpDecreaseBtn.addEventListener('click',()=>{if(!activeParticipant)return;activeParticipant.hp=Math.max(0,(activeParticipant.hp||0)-1);refreshHpControls();updateInitiativeList();drawAll();syncToServer();checkZeroAndOfferRemoval(activeParticipant);});
   hpIncreaseBtn.addEventListener('click',()=>{if(!activeParticipant)return;const m=activeParticipant.maxHp;activeParticipant.hp=m!==undefined?Math.min(m,(activeParticipant.hp||0)+1):(activeParticipant.hp||0)+1;refreshHpControls();updateInitiativeList();drawAll();syncToServer();});
   applyHpBtn.addEventListener('click',()=>{if(!activeParticipant)return;const nh=parseInt(currentHpEl.value),nm=parseInt(maxHpControlEl.value);if(!isNaN(nm))activeParticipant.maxHp=Math.max(0,nm);if(!isNaN(nh))activeParticipant.hp=Math.max(0,Math.min(activeParticipant.maxHp!==undefined?activeParticipant.maxHp:nh,nh));refreshHpControls();updateInitiativeList();drawAll();syncToServer();checkZeroAndOfferRemoval(activeParticipant);});
+  function applyBulkHp(operation){
+    const amount=parseInt(bulkHpAmount?.value,10);
+    if(!Number.isFinite(amount)||amount<=0){bulkHpStatus.textContent='Enter a positive amount.';return;}
+    const ids=selectedParticipants.length?selectedParticipants:(activeParticipant?[activeParticipant.id]:[]);
+    const targets=participants.filter(p=>ids.includes(p.id));
+    if(!targets.length){bulkHpStatus.textContent='Select at least one token.';return;}
+    targets.forEach(p=>{
+      const current=Number.isFinite(Number(p.hp))?Number(p.hp):0;
+      const maximum=Number.isFinite(Number(p.maxHp))?Math.max(0,Number(p.maxHp)):Number.POSITIVE_INFINITY;
+      p.hp=Math.max(0,Math.min(maximum,current+(operation==='heal'?amount:-amount)));
+    });
+    bulkHpStatus.textContent=`${operation==='heal'?'Healed':'Damaged'} ${targets.length} token${targets.length===1?'':'s'} by ${amount}.`;
+    refreshHpControls();updateInitiativeList();drawAll();syncToServer();
+  }
+  bulkDamageBtn?.addEventListener('click',()=>applyBulkHp('damage'));
+  bulkHealBtn?.addEventListener('click',()=>applyBulkHp('heal'));
   sanityDecreaseBtn.addEventListener('click',()=>{if(!activeParticipant)return;activeParticipant.sanity=Math.max(0,(activeParticipant.sanity||0)-1);refreshHpControls();updateInitiativeList();drawAll();syncToServer();checkZeroAndOfferRemoval(activeParticipant);});
   sanityIncreaseBtn.addEventListener('click',()=>{if(!activeParticipant)return;const m=activeParticipant.maxSanity;activeParticipant.sanity=m!==undefined?Math.min(m,(activeParticipant.sanity||0)+1):(activeParticipant.sanity||0)+1;refreshHpControls();updateInitiativeList();drawAll();syncToServer();});
   applySanityBtn.addEventListener('click',()=>{if(!activeParticipant)return;const ns=parseInt(currentSanityEl.value),nms=parseInt(maxSanityControlEl.value);if(!isNaN(nms))activeParticipant.maxSanity=Math.max(0,nms);if(!isNaN(ns))activeParticipant.sanity=Math.max(0,Math.min(activeParticipant.maxSanity!==undefined?activeParticipant.maxSanity:ns,ns));refreshHpControls();updateInitiativeList();drawAll();syncToServer();checkZeroAndOfferRemoval(activeParticipant);});
@@ -1877,12 +1949,65 @@ if(isHost){
   });
 
   // Movement
-  showMoveBtn.addEventListener('click',drawAll);
+  function applySelectedExtraMove(){
+    if(!activeParticipant)return;
+    activeParticipant.extraMoveUnits=Math.max(0,parseFloat(moveRangeEl.value)||0);
+    updateInitiativeList();drawAll();syncToServer();
+  }
+  showMoveBtn.addEventListener('click',applySelectedExtraMove);
+  moveRangeEl.addEventListener('change',applySelectedExtraMove);
   moveConfigToggle.addEventListener('change',()=>moveConfig=moveConfigToggle.checked);
   undoMoveBtn.addEventListener('click',undoLastMove);
   window.addEventListener('keydown',e=>{
+    const activeTag=document.activeElement?.tagName;
+    const isEditing=activeTag==='INPUT'||activeTag==='SELECT'||activeTag==='TEXTAREA'||document.activeElement?.isContentEditable;
     if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();undoLastMove();}
-    if((e.key==='Delete'||e.key==='Backspace')&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='SELECT'){
+    if(!isEditing&&(e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='c'&&selectedParticipants.length){
+      e.preventDefault();
+      participantClipboard=selectedParticipants.map(id=>participants.find(p=>p.id===id)).filter(Boolean).map(p=>structuredClone(p));
+      participantPasteCount=0;
+    }
+    if(!isEditing&&(e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='v'&&participantClipboard.length){
+      e.preventDefault();
+      participantPasteCount++;
+      const offset=30*participantPasteCount, idMap=new Map();
+      participantClipboard.forEach((p,index)=>idMap.set(p.id,`p_${Date.now()}_${index}_${Math.floor(Math.random()*1000)}`));
+      const copies=participantClipboard.map(p=>{
+        const copy=structuredClone(p);
+        copy.id=idMap.get(p.id);
+        copy.x=Math.min(canvas.width-(copy.radius||PARTICLE_RADIUS),Math.max(copy.radius||PARTICLE_RADIUS,copy.x+offset));
+        copy.y=Math.min(canvas.height-(copy.radius||PARTICLE_RADIUS),Math.max(copy.radius||PARTICLE_RADIUS,copy.y+offset));
+        copy.ownerId=idMap.get(p.ownerId)||p.ownerId||null;
+        copy.assignedTo=null;
+        copy.movedUnits=0;
+        copy.pingUntil=null;
+        delete copy.emoteUntil;
+        return copy;
+      });
+      participants.push(...copies);
+      selectedParticipants=copies.map(p=>p.id);
+      activeParticipant=copies[0]||activeParticipant;
+      updateInitiativeList();renderAssignmentList();refreshHpControls();drawAll();syncToServer();
+    }
+    if((e.key==='Delete'||e.key==='Backspace')&&!isEditing){
+      if(e.repeat)return;
+      const selectedTokenIds=selectedParticipants.filter(id=>participants.some(p=>p.id===id));
+      if(selectedTokenIds.length){
+        e.preventDefault();
+        const label=`${selectedTokenIds.length} selected token${selectedTokenIds.length===1?'':'s'}`;
+        showConfirm(`Remove ${label} from combat?`,()=>{
+          const ids=new Set(selectedTokenIds);
+          const removedIds=new Set(participants.filter(p=>ids.has(p.id)||ids.has(p.ownerId)).map(p=>p.id));
+          if(measuring?.entity&&removedIds.has(measuring.entity.id))measuring=null;
+          participants=participants.filter(p=>!removedIds.has(p.id));
+          selectedParticipants=[];
+          if(activeParticipant&&!participants.includes(activeParticipant))activeParticipant=null;
+          if(turnIndex>=participants.length)turnIndex=Math.max(0,participants.length-1);
+          if(participants.length&&!activeParticipant)activeParticipant=participants[turnIndex]||null;
+          updateInitiativeList();refreshHpControls();renderAssignmentList();drawAll();syncToServer();
+        });
+        return;
+      }
       if(selectedObjects.length||selectedObject){
         const ids=selectedObjects.length?selectedObjects:[selectedObject.id];
         objects=objects.filter(o=>!ids.includes(o.id));selectedObjects=[];selectedObject=null;
@@ -1901,9 +2026,16 @@ if(isHost){
   deleteObjectBtn.addEventListener('click',()=>{const ids=selectedObjects.length?selectedObjects:(selectedObject?[selectedObject.id]:[]);if(!ids.length){showAlert('No object selected.');return;}objects=objects.filter(o=>!ids.includes(o.id));selectedObjects=[];selectedObject=null;updateSelectedObjectUI();drawAll();syncToServer();});
   toggleDragObjectBtn.addEventListener('click',()=>{const ids=selectedObjects.length?selectedObjects:(selectedObject?[selectedObject.id]:[]);if(!ids.length){showAlert('No object selected.');return;}objects.forEach(o=>{if(ids.includes(o.id))o.draggable=!o.draggable;});updateSelectedObjectUI();drawAll();});
   guestDrawToggle.addEventListener('change',()=>{const en=guestDrawToggle.checked;if(!en&&objects.some(o=>o.guestDrawn)){showConfirm('Clear guest drawings too?',()=>{objects=objects.filter(o=>!o.guestDrawn);drawAll();syncToServer();},()=>syncToServer());}else{syncToServer();}});
-  guestDiceToggle.addEventListener('change',()=>syncToServer());
+  guestDiceToggle.addEventListener('change',()=>{updatePlayerManagedPreset();syncToServer();});
   guestDiceThrowToggle.addEventListener('change',()=>syncToServer());
   guestFreeMoveToggle?.addEventListener('change',()=>syncToServer());
+  guestEndTurnToggle?.addEventListener('change',()=>{updatePlayerManagedPreset();syncToServer();});
+  guestVitalsToggle?.addEventListener('change',()=>{updatePlayerManagedPreset();syncToServer();});
+  playerManagedPreset?.addEventListener('change',()=>{
+    const enabled=playerManagedPreset.checked;
+    [guestEndTurnToggle,guestVitalsToggle,guestDiceToggle,cfgAutoApprove].forEach(toggle=>{if(toggle)toggle.checked=enabled;});
+    syncToServer();
+  });
   guestInitiativeToggle?.addEventListener('change',()=>syncToServer());
   backgroundFillModeEl?.addEventListener('change',()=>{
     backgroundFillMode=backgroundFillModeEl.value||'stretch';
@@ -1989,7 +2121,7 @@ if(isHost){
   setBattleSizeBtn.addEventListener('click',()=>{const w=parseInt(battleWidthEl.value),h=parseInt(battleHeightEl.value);if(isNaN(w)||isNaN(h)||w<100||h<100){showAlert('Enter dimensions ≥100px.');return;}canvas.width=w;canvas.height=h;drawAll();syncToServer();window.syncDiceCanvas?.();});
   cfgPixelsPerUnit.addEventListener('change',()=>{pixelsPerUnit=parseFloat(cfgPixelsPerUnit.value)||20;drawAll();syncToServer();});
   cfgTolerance.addEventListener('change',syncToServer);
-  cfgAutoApprove.addEventListener('change',syncToServer);
+  cfgAutoApprove.addEventListener('change',()=>{updatePlayerManagedPreset();syncToServer();});
 
   function renderAssignmentList(){
     assignmentList.innerHTML='';
@@ -2084,6 +2216,7 @@ function checkZeroAndOfferRemoval(p){
     showConfirm(`${p.name}'s ${reason}. Remove from combat?`,()=>{
       if(measuring&&measuring.entity===p)measuring=null;
       participants=participants.filter(pp=>pp!==p&&pp.ownerId!==p.id);
+      selectedParticipants=selectedParticipants.filter(id=>participants.some(pp=>pp.id===id));
       if(activeParticipant===p)activeParticipant=null;
       if(turnIndex>=participants.length)turnIndex=Math.max(0,participants.length-1);
       if(participants.length&&!activeParticipant)activeParticipant=participants[turnIndex]||null;
@@ -2096,6 +2229,7 @@ function removeParticipant(p){
     if(measuring&&measuring.entity===p)measuring=null;
     // Also remove associated entities
     participants=participants.filter(pp=>pp!==p&&pp.ownerId!==p.id);
+    selectedParticipants=selectedParticipants.filter(id=>participants.some(pp=>pp.id===id));
     if(activeParticipant===p)activeParticipant=null;
     if(turnIndex>=participants.length)turnIndex=Math.max(0,participants.length-1);
     if(participants.length&&!activeParticipant)activeParticipant=participants[turnIndex]||null;
@@ -2124,9 +2258,9 @@ function updateInitiativeList(){
     const hp=p.hp??0,maxHp=p.maxHp;
     const hpRatio=maxHp?Math.max(0,Math.min(1,hp/maxHp)):0;
     const hpColor=hp<=0?'#f87171':(hpRatio<0.3?'#f5a623':'#4ade80');
-    const moved=p.movedUnits||0,speed=p.speed||0;
-    const remaining=Math.max(0,speed-moved);
-    const movRatio=speed>0?remaining/speed:0;
+    const moved=p.movedUnits||0,speed=p.speed||0,extraMove=p.extraMoveUnits||0,totalSpeed=speed+extraMove;
+    const remaining=Math.max(0,totalSpeed-moved);
+    const movRatio=totalSpeed>0?remaining/totalSpeed:0;
     const movColor=remaining<=0?'#f87171':(movRatio<0.35?'#f5a623':'#818cf8');
 
     const div=document.createElement('div');
@@ -2174,9 +2308,9 @@ function updateInitiativeList(){
     info.appendChild(chargesDiv);
 
     // Movement remaining
-    if(speed>0){
+    if(totalSpeed>0){
       const mDiv=document.createElement('div');mDiv.className='rmov';mDiv.style.color=movColor;
-      mDiv.textContent=`${remaining.toFixed(1)}/${speed}u remaining`;
+      mDiv.textContent=`${remaining.toFixed(1)}/${totalSpeed}u remaining${extraMove>0?` (${speed}+${extraMove})`:''}`;
       const mbar=document.createElement('div');mbar.className='movbar';
       const mfill=document.createElement('div');mfill.className='movbar-fill';mfill.style.width=(movRatio*100)+'%';mfill.style.background=movColor;
       mbar.appendChild(mfill);info.appendChild(mDiv);info.appendChild(mbar);
@@ -2282,9 +2416,9 @@ function updateRightInitiative(){
     const hp=p.hp??0,maxHp=p.maxHp;
     const hpRatio=maxHp?Math.max(0,Math.min(1,hp/maxHp)):0;
     const hpColor=hp<=0?'#f87171':(hpRatio<0.3?'#f5a623':'#4ade80');
-    const moved=p.movedUnits||0,speed=p.speed||0;
-    const remaining=Math.max(0,speed-moved);
-    const movRatio=speed>0?remaining/speed:0;
+    const moved=p.movedUnits||0,speed=p.speed||0,extraMove=p.extraMoveUnits||0,totalSpeed=speed+extraMove;
+    const remaining=Math.max(0,totalSpeed-moved);
+    const movRatio=totalSpeed>0?remaining/totalSpeed:0;
     const movColor=remaining<=0?'#f87171':(movRatio<0.35?'#f5a623':'#818cf8');
 
     const div=document.createElement('div');
@@ -2319,9 +2453,9 @@ function updateRightInitiative(){
     }
 
     // Remaining movement only for own token
-    if(isMyToken&&speed>0){
+    if(isMyToken&&totalSpeed>0){
       const mDiv=document.createElement('div');mDiv.className='rmov';mDiv.style.color=movColor;
-      mDiv.textContent=`${remaining.toFixed(1)}/${speed}u remaining`;
+      mDiv.textContent=`${remaining.toFixed(1)}/${totalSpeed}u remaining${extraMove>0?` (${speed}+${extraMove})`:''}`;
       const mbar=document.createElement('div');mbar.className='movbar';
       const mfill=document.createElement('div');mfill.className='movbar-fill';mfill.style.width=(movRatio*100)+'%';mfill.style.background=movColor;
       mbar.appendChild(mfill);info.appendChild(mDiv);info.appendChild(mbar);
@@ -2395,6 +2529,7 @@ function refreshHpControls(){
   [currentHpEl,maxHpControlEl,hpDecreaseBtn,hpIncreaseBtn,applyHpBtn].forEach(el=>el.disabled=!ok);
   [currentSanityEl,maxSanityControlEl,sanityDecreaseBtn,sanityIncreaseBtn,applySanityBtn].forEach(el=>el.disabled=!ok);
   [currentChargesEl,chargeStartGainEl,chargeEndGainEl,chargesDecreaseBtn,chargesIncreaseBtn,applyChargesBtn,announceChargesBtn].forEach(el=>el.disabled=!ok);
+  moveRangeEl.disabled=!ok;
   if(ok){
     ensureParticipantChargeFields(activeParticipant);
     currentHpEl.value=activeParticipant.hp??'';maxHpControlEl.value=activeParticipant.maxHp??'';
@@ -2402,6 +2537,7 @@ function refreshHpControls(){
     currentChargesEl.value=activeParticipant.charges??0;
     chargeStartGainEl.value=activeParticipant.chargesTurnStartAdd??0;
     chargeEndGainEl.value=activeParticipant.chargesTurnEndAdd??0;
+    moveRangeEl.value=activeParticipant.extraMoveUnits??0;
     selectedHpNameEl.style.display='block';
     selectedHpNameEl.textContent=`${activeParticipant.name} ${activeParticipant.type==='player'?'🛡':'⚔'}`;
     selectedSanityNameEl.style.display='block';
@@ -2410,6 +2546,7 @@ function refreshHpControls(){
     currentHpEl.value='';maxHpControlEl.value='';selectedHpNameEl.style.display='none';
     currentSanityEl.value='';maxSanityControlEl.value='';selectedSanityNameEl.style.display='none';
     currentChargesEl.value='';chargeStartGainEl.value='';chargeEndGainEl.value='';
+    moveRangeEl.value='0';
   }
 }
 
@@ -2506,10 +2643,11 @@ function updatePendingList(list){
       const expr=request.expression||'1d20';
       mov.innerHTML=`Requested roll: <strong>${expr}</strong>${request.fromGuestName?` by <strong>${request.fromGuestName}</strong>`:''}`;
     }else{
-      const overBy=(request.distUnits||0)-((request.remaining||0)+(request.extraUnits||0));
+      const allowed=request.allowedUnits??((request.remaining||0)+(request.extraUnits||0));
+      const overBy=(request.distUnits||0)-allowed;
       const isOver=overBy>0.01;
-      let html=`Remaining: <strong style="color:${(request.remaining||0)<=0?'#f87171':'#818cf8'}">${(request.remaining||0).toFixed(1)}u</strong>`;
-      if(request.extraUnits>0)html+=` (+${request.extraUnits}u extra)`;
+      let html=`Remaining: <strong style="color:${allowed<=0?'#f87171':'#818cf8'}">${allowed.toFixed(1)}u</strong>`;
+      if(request.extraUnits>0)html+=` (${request.extraUnits}u extra speed)`;
       html+=`&nbsp;·&nbsp; Requested: <strong>${(request.distUnits||0).toFixed(1)}u</strong>`;
       if(isOver)html+=`<br><span class="req-warn">⚠ Exceeds limit by ${overBy.toFixed(1)}u</span>`;
       mov.innerHTML=html;
@@ -2524,7 +2662,33 @@ function updatePendingList(list){
 /* ================================================================
    GUEST CONTROLS
 ================================================================ */
+function guestPathPixels(path=guestMovePath){
+  if(!Array.isArray(path))return 0;
+  let total=0;
+  for(let index=1;index<path.length;index++)total+=Math.hypot(path[index].x-path[index-1].x,path[index].y-path[index-1].y);
+  return total;
+}
 if(!isHost){
+  function appendGuestPathPoint(point){
+    const p=participants.find(pp=>pp.id===localSelection);
+    if(!p||!guestMovePath)return;
+    const previous=guestMovePath[guestMovePath.length-1];
+    const dx=point.x-previous.x,dy=point.y-previous.y,segment=Math.hypot(dx,dy);
+    if(segment<2)return;
+    let allowedSegment=segment;
+    if(!guestFreeMoveEnabled){
+      const extra=Math.max(0,Number(p.extraMoveUnits)||0);
+      const remaining=Math.max(0,(p.speed||0)+extra-(p.movedUnits||0));
+      const maximum=remaining*pixelsPerUnit+(p.radius||PARTICLE_RADIUS);
+      allowedSegment=Math.min(segment,Math.max(0,maximum-guestPathPixels()));
+    }
+    if(allowedSegment<=0)return;
+    const ratio=allowedSegment/segment;
+    guestMovePath.push({x:previous.x+dx*ratio,y:previous.y+dy*ratio});
+    if(guestMovePath.length>500)guestMovePath.splice(1,guestMovePath.length-500);
+    lastTargetPos=guestMovePath[guestMovePath.length-1];
+    updateGuestTargetInfo();drawAll();
+  }
   function requestGuestChargeDelta(delta){
     if(!localSelection)return setGuestChargeStatus('Select your token first.','warn');
     const p=participants.find(pp=>pp.id===localSelection);
@@ -2555,21 +2719,38 @@ if(!isHost){
     if(!p||p.type!=='player')return setGuestStatus('Only player tokens can end player turns.','warn');
     if(participants[turnIndex]?.id!==p.id)return setGuestStatus("It's not your turn.",'warn');
     send({type:'guest_end_turn',participantId:localSelection});
-    setGuestStatus('⏳ End turn request sent…');
+    setGuestStatus('⏳ Ending turn…');
+  }
+  function requestGuestVitals(operation){
+    if(!localSelection)return setGuestStatus('Select your token first.','warn');
+    const amount=parseInt(guestHpAmount?.value,10);
+    if(!Number.isFinite(amount)||amount<=0)return setGuestStatus('Enter a positive HP amount.','warn');
+    send({type:'guest_vitals_update',participantId:localSelection,operation,amount});
+    if(guestVitalsStatus)guestVitalsStatus.textContent='Updating HP…';
   }
   guestRequestMoveBtn.addEventListener('click',()=>{
     if(!localSelection)return setGuestStatus('Select your token first.','warn');
+    const pathMode=guestMovementModeEl?.value==='path';
+    const path=pathMode?guestMovePath:null;
+    if(pathMode&&(!path||path.length<2))return setGuestStatus('Draw a path on the battlefield first.','warn');
     if(!lastTargetPos)return setGuestStatus('Click the map to set a target first.','warn');
     const p=participants.find(pp=>pp.id===localSelection);
     if(p)clearParticipantEmote(p,true);
-    send({type:'request_move',participantId:localSelection,target:lastTargetPos,extraUnits:parseFloat(guestExtraEl.value)||0});
-    lastTargetPos=null;updateGuestTargetInfo();drawAll();
+    send({type:'request_move',participantId:localSelection,target:lastTargetPos,path});
+    lastTargetPos=null;guestMovePath=null;guestPathDrawing=false;updateGuestTargetInfo();drawAll();
   });
   guestChargesDecreaseBtn?.addEventListener('click',()=>requestGuestChargeDelta(-1));
   guestChargesIncreaseBtn?.addEventListener('click',()=>requestGuestChargeDelta(1));
   guestApplyChargeGainsBtn?.addEventListener('click',requestGuestChargeConfig);
   guestEndTurnBtn?.addEventListener('click',requestGuestEndTurn);
-  guestClearTargetBtn.addEventListener('click',()=>{lastTargetPos=null;updateGuestTargetInfo();drawAll();});
+  guestDamageBtn?.addEventListener('click',()=>requestGuestVitals('damage'));
+  guestHealBtn?.addEventListener('click',()=>requestGuestVitals('heal'));
+  guestClearTargetBtn.addEventListener('click',()=>{lastTargetPos=null;guestMovePath=null;guestPathDrawing=false;updateGuestTargetInfo();drawAll();});
+  guestMovementModeEl?.addEventListener('change',()=>{
+    lastTargetPos=null;guestMovePath=null;guestPathDrawing=false;
+    guestRequestMoveBtn.textContent=guestMovementModeEl.value==='path'?'✓ Confirm Path':'🏃 Request Move';
+    updateGuestTargetInfo();drawAll();
+  });
   guestTabBtnMain?.addEventListener('click',()=>switchGuestTab('main'));
   guestTabBtnDraw?.addEventListener('click',()=>switchGuestTab('draw'));
   guestBrushSizeEl?.addEventListener('input',syncGuestDrawControls);
@@ -2588,15 +2769,16 @@ function updateGuestTargetInfo(){
     if(localSelection){
       const p=participants.find(pp=>pp.id===localSelection);
       if(p){
-        const dx=lastTargetPos.x-p.x,dy=lastTargetPos.y-p.y,cd=Math.sqrt(dx*dx+dy*dy);
-        const units=Math.round(Math.max(0,cd-(p.radius||PARTICLE_RADIUS))/pixelsPerUnit);
-        const rem=Math.max(0,(p.speed||0)-(p.movedUnits||0));
-        extra=` · ${units}u (${rem.toFixed(0)}u left)`;
+        const pathPixels=guestMovementModeEl?.value==='path'&&guestMovePath?guestPathPixels(guestMovePath):Math.hypot(lastTargetPos.x-p.x,lastTargetPos.y-p.y);
+        const units=Math.max(0,(pathPixels-(p.radius||PARTICLE_RADIUS))/pixelsPerUnit);
+        const extraSpeed=Math.max(0,Number(p.extraMoveUnits)||0);
+        const rem=Math.max(0,(p.speed||0)+extraSpeed-(p.movedUnits||0));
+        extra=` · ${units.toFixed(1)}u (${Math.max(0,rem-units).toFixed(1)}u left)`;
       }
     }
     guestTargetInfo.textContent=`🎯 Target set${extra}`;guestTargetInfo.className='has-target';
   } else {
-    guestTargetInfo.textContent='No target — click map to place one.';guestTargetInfo.className='';
+    guestTargetInfo.textContent=guestMovementModeEl?.value==='path'?'Draw from your token or across the map.':'No target — click map to place one.';guestTargetInfo.className='';
   }
 }
 
@@ -2688,7 +2870,7 @@ function drawParticipants(){
   const activeAnimatedEmotes=new Set();
   participants.forEach((p,i)=>{
     const pos=getParticipantDrawPos(p,now),px=pos.x,py=pos.y;
-    const isActive=isHost?p===activeParticipant:p.id===localSelection;
+    const isActive=isHost?(p===activeParticipant||selectedParticipants.includes(p.id)):p.id===localSelection;
     const isTurn=i===turnIndex,pr=p.radius||PARTICLE_RADIUS;
     const color=p.color||(p.type==='player'?'#6366f1':'#e05252');
     if(p.pingUntil&&p.pingUntil>Date.now())drawPingRings(p,Date.now(),px,py);
@@ -2780,8 +2962,9 @@ function drawParticipants(){
       if(p.assignedTo===GUEST_NAME||(p.ownerId&&participants.find(o=>o.id===p.ownerId&&o.assignedTo===GUEST_NAME))){ctx.save();ctx.strokeStyle='#818cf8';ctx.lineWidth=2;ctx.setLineDash([3,3]);ctx.beginPath();ctx.arc(px,py,pr+6,0,Math.PI*2);ctx.stroke();ctx.restore();}
     }
 
-    if(p.speed>0){
-      const moved=p.movedUnits||0,rem=Math.max(0,p.speed-moved),ratio=rem/p.speed;
+    const totalSpeed=(p.speed||0)+(p.extraMoveUnits||0);
+    if(totalSpeed>0){
+      const moved=p.movedUnits||0,rem=Math.max(0,totalSpeed-moved),ratio=rem/totalSpeed;
       const bw=pr*2,bx=px-pr,by=py+pr+5;
       ctx.save();
       ctx.fillStyle='rgba(0,0,0,.5)';ctx.fillRect(bx,by,bw,3);
@@ -2813,9 +2996,9 @@ function drawParticipants(){
 
 function drawMoveRange(){
   if(!activeParticipant)return;
-  const extra=parseInt(moveRangeEl.value)||0;
+  const extra=Math.max(0,Number(activeParticipant.extraMoveUnits)||0);
   const moved=activeParticipant.movedUnits||0;
-  const remaining=Math.max(0,(activeParticipant.speed||0)-moved)+extra;
+  const remaining=Math.max(0,(activeParticipant.speed||0)+extra-moved);
   const rangePx=remaining*pixelsPerUnit+(activeParticipant.radius||PARTICLE_RADIUS);
   const pos=getParticipantDrawPos(activeParticipant);
   ctx.save();ctx.strokeStyle='rgba(74,222,128,.8)';ctx.lineWidth=2;ctx.setLineDash([6,4]);
@@ -2832,10 +3015,13 @@ function drawMoveRequestPreviews(){
     ctx.globalAlpha=0.32;ctx.beginPath();ctx.arc(tx,ty,pr,0,Math.PI*2);ctx.fillStyle=p.color||'#6366f1';ctx.fill();
     ctx.globalAlpha=0.7;ctx.strokeStyle='#f5a623';ctx.lineWidth=2;ctx.setLineDash([]);ctx.stroke();ctx.globalAlpha=1;
     const ax=p.x+nx*pr,ay=p.y+ny*pr,bx=tx-nx*pr,by=ty-ny*pr;
-    ctx.strokeStyle='rgba(245,166,35,.8)';ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();ctx.setLineDash([]);
+    ctx.strokeStyle='rgba(245,166,35,.8)';ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.beginPath();
+    if(Array.isArray(r.path)&&r.path.length>1)r.path.forEach((point,index)=>index===0?ctx.moveTo(point.x,point.y):ctx.lineTo(point.x,point.y));
+    else{ctx.moveTo(ax,ay);ctx.lineTo(bx,by);}
+    ctx.stroke();ctx.setLineDash([]);
     const angle=Math.atan2(dy,dx);ctx.fillStyle='rgba(245,166,35,.9)';
     ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx-10*Math.cos(angle-0.4),by-10*Math.sin(angle-0.4));ctx.lineTo(bx-10*Math.cos(angle+0.4),by-10*Math.sin(angle+0.4));ctx.closePath();ctx.fill();
-    const overBy=r.distUnits-((r.remaining||0)+(r.extraUnits||0));
+    const overBy=r.distUnits-(r.allowedUnits??((r.remaining||0)+(r.extraUnits||0)));
     const isOver=overBy>0.01;
     ctx.fillStyle=isOver?'#f87171':'#f5a623';ctx.font='bold 11px Source Sans 3, sans-serif';ctx.textAlign='center';
     ctx.fillText(`${r.fromGuestName} ${isOver?'⚠+'+overBy.toFixed(1)+'u':'('+r.distUnits.toFixed(1)+'u)'}`,tx,ty-pr-7);
@@ -2847,7 +3033,7 @@ function drawGuestOverlays(){
   if(localSelection){
     const p=participants.find(pp=>pp.id===localSelection);
     if(p){
-      const rem=Math.max(0,(p.speed||0)-(p.movedUnits||0));
+      const rem=Math.max(0,(p.speed||0)+(p.extraMoveUnits||0)-(p.movedUnits||0));
       const rangePx=rem*pixelsPerUnit+(p.radius||PARTICLE_RADIUS);
       const pos=getParticipantDrawPos(p);
       ctx.save();ctx.strokeStyle='rgba(99,102,241,.5)';ctx.lineWidth=2;ctx.setLineDash([6,4]);
@@ -2872,6 +3058,11 @@ function drawGuestOverlays(){
         ctx.fillText(`${units} units`,(sx+x)/2,(sy+y)/2-8);ctx.textAlign='left';
       }
     }
+    ctx.restore();
+  }
+  if(guestMovePath?.length>1){
+    ctx.save();ctx.strokeStyle='#4ade80';ctx.lineWidth=3;ctx.setLineDash([]);ctx.lineJoin='round';ctx.lineCap='round';
+    ctx.beginPath();guestMovePath.forEach((point,index)=>index===0?ctx.moveTo(point.x,point.y):ctx.lineTo(point.x,point.y));ctx.stroke();
     ctx.restore();
   }
   if(guestMeasuring&&guestMeasuring.active)drawMeasureLine(guestMeasuring.entity,guestMeasuring.cursorX,guestMeasuring.cursorY,true);
@@ -2989,10 +3180,18 @@ canvas.addEventListener('mousedown',evt=>{
         guestSelectedInfo.textContent=myTokenIds.length>1?`🎮 ${displayName} — click others to switch`:`✅ Selected: ${displayName}`;
         if(isMobileCombat())mobileStatus.textContent=`Selected: ${displayName}`;
         refreshGuestChargeControls();
+        if(guestMovementModeEl?.value==='path'&&(isOwned||isAssocOfMine)){
+          guestMovePath=[{x:p.x,y:p.y}];guestPathDrawing=true;lastTargetPos=null;updateGuestTargetInfo();
+        }
         drawAll();
       }
     } else if(!p&&(!isMobileCombat()||mobileToolMode==='move')){
       if(localSelection){
+        if(guestMovementModeEl?.value==='path'){
+          const selected=participants.find(pp=>pp.id===localSelection);
+          if(selected){guestMovePath=[{x:selected.x,y:selected.y}];guestPathDrawing=true;appendGuestPathPoint(pos);}
+          return;
+        }
         lastTargetPos=pos;updateGuestTargetInfo();
         if(isMobileCombat()){
           guestRequestMoveBtn.click();
@@ -3006,6 +3205,12 @@ canvas.addEventListener('mousedown',evt=>{
 
   // HOST
   if(evt.shiftKey){
+    const cp=findParticipantAt(pos);
+    if(cp){
+      selectedParticipants=selectedParticipants.includes(cp.id)?selectedParticipants.filter(id=>id!==cp.id):[...selectedParticipants,cp.id];
+      activeParticipant=participants.find(p=>p.id===selectedParticipants[0])||activeParticipant;
+      updateInitiativeList();refreshHpControls();drawAll();return;
+    }
     const co=findObjectAt(pos);
     if(co){selectedObjects=selectedObjects.includes(co.id)?selectedObjects.filter(id=>id!==co.id):[...selectedObjects,co.id];selectedObject=objects.find(o=>o.id===selectedObjects[0])||null;updateSelectedObjectUI();drawAll();return;}
     selecting=true;selectionRect={x:pos.x,y:pos.y,w:0,h:0};drawAll();return;
@@ -3039,14 +3244,16 @@ canvas.addEventListener('mousedown',evt=>{
 
   const p=findParticipantAt(pos);
   if(p){
+    selectedParticipants=(selectedParticipants.length>1&&selectedParticipants.includes(p.id))?selectedParticipants:[p.id];
+    activeParticipant=p;
     // In free-move mode, start dragging the token
     if(hostFreeMoveMode){
       clearParticipantEmote(p,false);
       draggingParticipantRef=p;
       participantDragOffset={x:pos.x-p.x,y:pos.y-p.y};
+      participantDragInitial=selectedParticipants.map(id=>{const participant=participants.find(pp=>pp.id===id);return participant?{id,x:participant.x,y:participant.y}:null;}).filter(Boolean);
       drawAll();return;
     }
-    activeParticipant=p;
     if(isMobileCombat())mobileStatus.textContent=`Selected: ${p.name||'token'}`;
     updateInitiativeList();refreshHpControls();drawAll();return;
   }
@@ -3056,10 +3263,10 @@ canvas.addEventListener('mousedown',evt=>{
   moveConfig=moveConfigToggle.checked;
   if(!moveConfig&&activeParticipant!==participants[turnIndex]&&!(activeParticipant.ownerId&&participants[turnIndex]&&participants[turnIndex].id===activeParticipant.ownerId))return;
 
-  const extra=parseInt(moveRangeEl.value)||0;
+  const extra=Math.max(0,Number(activeParticipant.extraMoveUnits)||0);
   const moved=activeParticipant.movedUnits||0;
-  const remaining=Math.max(0,(activeParticipant.speed||0)-moved);
-  const rangePx=(remaining+extra)*pixelsPerUnit+(activeParticipant.radius||PARTICLE_RADIUS);
+  const remaining=Math.max(0,(activeParticipant.speed||0)+extra-moved);
+  const rangePx=remaining*pixelsPerUnit+(activeParticipant.radius||PARTICLE_RADIUS);
   const dx=pos.x-activeParticipant.x,dy=pos.y-activeParticipant.y;
   const dist=Math.sqrt(dx*dx+dy*dy);
   const edgeDist=Math.max(0,dist-(activeParticipant.radius||PARTICLE_RADIUS));
@@ -3075,8 +3282,8 @@ canvas.addEventListener('mousedown',evt=>{
     updateInitiativeList();drawAll();syncToServer();
   } else {
     // Out of range — offer to enable free move
-    const over=(distUnits-(remaining+extra)).toFixed(1);
-    showConfirm(`Out of range! Requested: ${distUnits.toFixed(1)}u — Remaining: ${(remaining+extra).toFixed(1)}u (over by ${over}u). Enable Free Movement to place here anyway?`,()=>{
+    const over=(distUnits-remaining).toFixed(1);
+    showConfirm(`Out of range! Requested: ${distUnits.toFixed(1)}u — Remaining: ${remaining.toFixed(1)}u (over by ${over}u). Enable Free Movement to place here anyway?`,()=>{
       moveConfigToggle.checked=true;moveConfig=true;
       const from={x:activeParticipant.x,y:activeParticipant.y};
       pushMoveHistory({type:'move',id:activeParticipant.id,from,movedBefore:moved});
@@ -3094,14 +3301,20 @@ canvas.addEventListener('mousemove',evt=>{
   // Die drag (host and guest)
   if(draggingDie&&isMouseDown){window.combatDice?.updateDieDrag(pos.x,pos.y);return;}
   if(!isHost){
+    if(guestPathDrawing&&guestMovementModeEl?.value==='path'){appendGuestPathPoint(pos);return;}
     if(guestIsDrawing&&guestCurrentDrawing){const o=guestCurrentDrawing;if(o.type==='freehand')o.points.push(pos);else if(o.type==='circle')o.r=Math.sqrt((pos.x-o.x)**2+(pos.y-o.y)**2);else if(o.type==='rect'){o.w=pos.x-o.x;o.h=pos.y-o.y;}drawAll();drawCurrentPreview(guestCurrentDrawing);return;}
     if(guestMeasuring&&guestMeasuring.active){guestMeasuring.cursorX=pos.x;guestMeasuring.cursorY=pos.y;drawAll();}
     return;
   }
   // Free-move: drag participant
   if(hostFreeMoveMode&&draggingParticipantRef&&isMouseDown){
-    draggingParticipantRef.x=pos.x-participantDragOffset.x;
-    draggingParticipantRef.y=pos.y-participantDragOffset.y;
+    const anchor=participantDragInitial?.find(p=>p.id===draggingParticipantRef.id);
+    const nextX=pos.x-participantDragOffset.x,nextY=pos.y-participantDragOffset.y;
+    const deltaX=anchor?nextX-anchor.x:0,deltaY=anchor?nextY-anchor.y:0;
+    participantDragInitial?.forEach(initial=>{
+      const participant=participants.find(p=>p.id===initial.id);if(!participant)return;
+      participant.x=initial.x+deltaX;participant.y=initial.y+deltaY;
+    });
     drawAll();return;
   }
   if(!drawMode&&!isMouseDown){const _overDie=window.combatDice&&window.combatDice._dice.length>0&&window.combatDice.findDieAt(pos.x,pos.y)>=0;canvas.classList.toggle('can-drag',_overDie||(hostFreeMoveMode?!!(findParticipantAt(pos)||findObjectAt(pos)):!!(findObjectAt(pos)?.draggable)));}
@@ -3127,16 +3340,19 @@ canvas.addEventListener('mousemove',evt=>{
 canvas.addEventListener('mouseup',evt=>{
   isMouseDown=false;mouseDownPos=null;
   if(draggingDie){draggingDie=false;window.combatDice?.releaseDieDrag();return;}
+  if(!isHost&&guestPathDrawing){guestPathDrawing=false;updateGuestTargetInfo();drawAll();return;}
   if(!isHost&&guestIsDrawing&&guestCurrentDrawing){let obj={...guestCurrentDrawing};if(obj.type==='circle'){obj.cx=obj.x;obj.cy=obj.y;}guestIsDrawing=false;guestCurrentDrawing=null;send({type:'guest_draw',object:obj});objects.push(obj);drawAll();return;}
   if(isHost&&drawMode&&isDrawing&&currentDrawing){let obj={...currentDrawing};if(obj.type==='circle')obj={...obj,cx:obj.x,cy:obj.y};objects.push(obj);selectedObject=objects[objects.length-1];selectedObjects=[selectedObject.id];updateSelectedObjectUI();currentDrawing=null;isDrawing=false;drawAll();syncToServer();return;}
   if(isHost&&selecting&&selectionRect){
     const rx=Math.min(selectionRect.x,selectionRect.x+selectionRect.w),ry=Math.min(selectionRect.y,selectionRect.y+selectionRect.h),rw=Math.abs(selectionRect.w),rh=Math.abs(selectionRect.h);
+    selectedParticipants=participants.filter(p=>{const r=p.radius||PARTICLE_RADIUS;return p.x+r>=rx&&p.x-r<=rx+rw&&p.y+r>=ry&&p.y-r<=ry+rh;}).map(p=>p.id);
     selectedObjects=[];objects.forEach(o=>{const bb=o.type==='freehand'?boundingBoxFor(o.points):o.type==='rect'?{x:Math.min(o.x,o.x+o.w),y:Math.min(o.y,o.y+o.h),w:Math.abs(o.w),h:Math.abs(o.h)}:{x:(o.cx||o.x)-(o.r||0),y:(o.cy||o.y)-(o.r||0),w:(o.r||0)*2,h:(o.r||0)*2};if(bb.x+bb.w>=rx&&bb.x<=rx+rw&&bb.y+bb.h>=ry&&bb.y<=ry+rh)selectedObjects.push(o.id);});
-    selectionRect=null;selecting=false;selectedObject=objects.find(o=>o.id===selectedObjects[0])||null;updateSelectedObjectUI();drawAll();return;
+    selectionRect=null;selecting=false;activeParticipant=participants.find(p=>p.id===selectedParticipants[0])||activeParticipant;selectedObject=objects.find(o=>o.id===selectedObjects[0])||null;updateSelectedObjectUI();updateInitiativeList();refreshHpControls();drawAll();return;
   }
   if(isHost&&draggingObjectRef){draggingObjectRef=null;multiDragInitial=null;syncToServer();}
   if(isHost&&draggingParticipantRef){
     draggingParticipantRef=null;
+    participantDragInitial=null;
     updateInitiativeList();syncToServer();
   }
 });
@@ -3172,7 +3388,7 @@ canvas.addEventListener('contextmenu',evt=>{
 });
 
 canvas.addEventListener('wheel',e=>{if(!isHost||!e.shiftKey||!selectedObject||selectedObjects.length>1)return;const o=selectedObject;if(o.type!=='image')return;e.preventDefault();const delta=e.deltaY<0?1.1:0.9;o.w*=delta;o.h*=delta;drawAll();},{passive:false});
-canvas.addEventListener('mouseleave',()=>{if(draggingDie){draggingDie=false;window.combatDice?.releaseDieDrag();}if(!isHost)return;isMouseDown=false;isDrawing=false;draggingObjectRef=null;draggingParticipantRef=null;selecting=false;selectionRect=null;drawAll();});
+canvas.addEventListener('mouseleave',()=>{if(draggingDie){draggingDie=false;window.combatDice?.releaseDieDrag();}if(!isHost){isMouseDown=false;guestPathDrawing=false;return;}isMouseDown=false;isDrawing=false;draggingObjectRef=null;draggingParticipantRef=null;participantDragInitial=null;selecting=false;selectionRect=null;drawAll();});
 
 function dispatchTouchAsMouse(type,touch){
   canvas.dispatchEvent(new MouseEvent(type,{
@@ -4628,6 +4844,7 @@ function removeAssociatedEntity(p){
   showConfirm(`Remove associated entity "${p.name}"?`,()=>{
     if(measuring&&measuring.entity===p)measuring=null;
     participants=participants.filter(pp=>pp!==p);
+    selectedParticipants=selectedParticipants.filter(id=>id!==p.id);
     updateInitiativeList();refreshHpControls();drawAll();syncToServer();
   });
 }

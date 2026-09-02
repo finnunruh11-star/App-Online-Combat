@@ -5082,8 +5082,7 @@ function parseSpeed(speed){
   if(!speed)return 6;
   const num=parseInt(speed);
   if(isNaN(num))return 6;
-  // Convert ft to units (assuming 5ft = 1 unit)
-  return Math.round(num/5);
+  return num;
 }
 
 function parseHp(hp){

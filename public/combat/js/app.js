@@ -2810,7 +2810,10 @@ function drawAll(){
   drawGrid();
   objects.forEach(o=>drawObject(o,(isHost&&selectedObjects.includes(o.id))||(isHost&&selectedObject&&selectedObject.id===o.id)));
   if(isHost&&selectionRect)drawSelectionRect();
+  drawAuraAreas();
   drawParticipants();
+  drawAuraHighlights();
+  if(isHost)drawParticipantSelection();
   if(isHost&&activeParticipant)drawMoveRange();
   if(isHost&&pendingRequests.length)drawMoveRequestPreviews();
   if(isHost&&measuring&&measuring.active)drawMeasureLine(measuring.entity,measuring.cursorX,measuring.cursorY,false);
@@ -2851,6 +2854,44 @@ function drawGrid(){
   for(let x=0;x<canvas.width;x+=pixelsPerUnit){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();}
   for(let y=0;y<canvas.height;y+=pixelsPerUnit){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();}
   ctx.restore();
+}
+
+function auraTargets(source){
+  const radiusUnits=Number(source.aura?.radius);
+  if(!source.aura?.color||!Number.isFinite(radiusUnits)||radiusUnits<=0)return [];
+  const radiusPx=radiusUnits*pixelsPerUnit;
+  return participants.filter(p=>p.id!==source.id&&Math.hypot(p.x-source.x,p.y-source.y)<=radiusPx);
+}
+
+function drawAuraAreas(){
+  participants.forEach(source=>{
+    const radiusUnits=Number(source.aura?.radius);
+    if(!source.aura?.color||!Number.isFinite(radiusUnits)||radiusUnits<=0)return;
+    ctx.save();
+    ctx.fillStyle=hexToRgba(source.aura.color,0.08);ctx.strokeStyle=hexToRgba(source.aura.color,0.5);ctx.lineWidth=1.5;ctx.setLineDash([5,4]);
+    ctx.beginPath();ctx.arc(source.x,source.y,radiusUnits*pixelsPerUnit,0,Math.PI*2);ctx.fill();ctx.stroke();
+    ctx.restore();
+  });
+}
+
+function drawAuraHighlights(){
+  participants.forEach(source=>{
+    auraTargets(source).forEach(target=>{
+      const radius=(target.radius||PARTICLE_RADIUS)+4;
+      ctx.save();
+      ctx.fillStyle=hexToRgba(source.aura.color,0.16);ctx.strokeStyle=hexToRgba(source.aura.color,0.7);ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(target.x,target.y,radius,0,Math.PI*2);ctx.fill();ctx.stroke();
+      ctx.restore();
+    });
+  });
+}
+
+function drawParticipantSelection(){
+  participants.filter(p=>selectedParticipants.includes(p.id)).forEach(p=>{
+    const radius=(p.radius||PARTICLE_RADIUS)+8;
+    ctx.save();ctx.strokeStyle='#f5a623';ctx.lineWidth=2;ctx.setLineDash([4,3]);
+    ctx.beginPath();ctx.arc(p.x,p.y,radius,0,Math.PI*2);ctx.stroke();ctx.restore();
+  });
 }
 
 function drawPingRings(p,now,x=p.x,y=p.y){
@@ -4641,6 +4682,46 @@ function showItemContextMenu(p,clientX,clientY){
     pAct.innerHTML='<span>📍</span><span>Ping token</span>';
     pAct.addEventListener('click',()=>{closeItemContextMenu();p.pingUntil=Date.now()+3000;startAnimLoop();syncToServer();});
     actions.appendChild(pAct);
+    const auraAct=document.createElement('div');auraAct.className='ctx-action';
+    auraAct.innerHTML='<span>◉</span><span>Configure Aura</span>';
+    auraAct.addEventListener('click',()=>{
+      closeItemContextMenu();
+      const targets=selectedParticipants.includes(p.id)?participants.filter(pp=>selectedParticipants.includes(pp.id)):[p];
+      showPrompt('Aura color (hex):',p.aura?.color||p.color||'#6366f1',(color)=>{
+        if(!/^#[0-9a-f]{6}$/i.test(color.trim())){showAlert('Enter a hex color such as #6366f1.');return;}
+        showPrompt('Aura radius in units (0 removes it):',String(p.aura?.radius??5),(radius)=>{
+          const value=Number(radius);
+          if(!Number.isFinite(value)||value<0){showAlert('Enter a radius of 0 or greater.');return;}
+          targets.forEach(target=>{target.aura=value>0?{color:color.trim(),radius:value}:null;});
+          drawAll();syncToServer();
+        });
+      });
+    });
+    actions.appendChild(auraAct);
+    const moveToEnemyAct=document.createElement('div');moveToEnemyAct.className='ctx-action';
+    moveToEnemyAct.innerHTML='<span>➜</span><span>Move to Nearest Enemy</span>';
+    moveToEnemyAct.addEventListener('click',()=>{
+      closeItemContextMenu();
+      const movers=selectedParticipants.includes(p.id)?participants.filter(pp=>selectedParticipants.includes(pp.id)):[p];
+      let movedCount=0;
+      movers.forEach(mover=>{
+        const enemy=participants.filter(candidate=>candidate.id!==mover.id&&candidate.type!==mover.type).sort((a,b)=>Math.hypot(a.x-mover.x,a.y-mover.y)-Math.hypot(b.x-mover.x,b.y-mover.y))[0];
+        const maxDistance=(Number(mover.speed)||0)*pixelsPerUnit;
+        if(!enemy||maxDistance<=0)return;
+        const dx=enemy.x-mover.x,dy=enemy.y-mover.y,distance=Math.hypot(dx,dy);
+        const stopDistance=(mover.radius||PARTICLE_RADIUS)+(enemy.radius||PARTICLE_RADIUS);
+        const travel=Math.min(maxDistance,Math.max(0,distance-stopDistance));
+        if(travel<=0)return;
+        const from={x:mover.x,y:mover.y};
+        clearParticipantEmote(mover,false);
+        mover.x+=dx/distance*travel;mover.y+=dy/distance*travel;
+        mover.movedUnits=(mover.movedUnits||0)+travel/pixelsPerUnit;
+        animateParticipantMove(mover.id,from.x,from.y,mover.x,mover.y,1000);movedCount++;
+      });
+      if(!movedCount){showAlert('No selected entity has a reachable enemy and a movement speed.');return;}
+      updateInitiativeList();refreshHpControls();drawAll();syncToServer();
+    });
+    actions.appendChild(moveToEnemyAct);
     const dmgAct=document.createElement('div');dmgAct.className='ctx-action';
     dmgAct.innerHTML='<span>⚔️</span><span>Damage Entity</span>';
     dmgAct.addEventListener('click',()=>{

@@ -126,7 +126,8 @@
       </div>
       <div class="btns">
         <button class="primary" id="joinBtn">Join session</button>
-        <button class="secondary" id="copyBtn" type="button">Copy invite text</button>
+        <button class="secondary" id="copyBtn" type="button">Copy connection details</button>
+        <button class="secondary" id="pasteBtn" type="button">Paste connection details</button>
       </div>
       <div class="tiny" style="margin-top:10px">Guests need the relay URL and the room code shown by the host.</div>
     </aside>
@@ -284,12 +285,50 @@
       saveSettings();
       const serverUrl = normalizeServerUrl(latestRuntime?.tunnelUrl || $('joinServerUrl').value || $('serverUrl').value);
       const room = $('roomCodeInput').value.trim().toUpperCase() || 'ROOMCODE';
-      const text = `Open: ${browserLobbyUrl(serverUrl)}\nRoom: ${room}`;
+      const lobbyUrl = browserLobbyUrl(serverUrl);
+      const joinUrl = `${lobbyUrl}?relay=${encodeURIComponent(serverUrl)}&room=${encodeURIComponent(room)}`;
+      const text = `TTRPG Combat Invite\nJoin: ${joinUrl}\nRelay: ${serverUrl}\nRoom: ${room}`;
       try {
         await navigator.clipboard.writeText(text);
-        setStatus('Invite text copied.', 'ok');
+        setStatus('Connection details copied.', 'ok');
       } catch {
         setStatus(text, 'ok');
+      }
+    });
+
+    function importConnectionDetails(text) {
+      const value = String(text || '').trim();
+      const joinUrl = value.match(/(?:Join|Open):\s*(https?:\/\/\S+)/i)?.[1];
+      const relayLine = value.match(/Relay:\s*(https?:\/\/\S+)/i)?.[1];
+      const roomLine = value.match(/Room:\s*([A-Z0-9_-]+)/i)?.[1];
+      let relay = relayLine;
+      let room = roomLine;
+      if (joinUrl) {
+        try {
+          const url = new URL(joinUrl);
+          relay ||= url.searchParams.get('relay') || undefined;
+          room ||= url.searchParams.get('room') || undefined;
+        } catch {}
+      }
+      if (!room && /^[A-Z0-9_-]{3,12}$/i.test(value)) room = value;
+      if (!relay && /^https?:\/\/\S+$/i.test(value)) relay = value;
+      if (!relay && !room) throw new Error('Clipboard does not contain a room code, relay URL, or TTRPG Combat invite.');
+      if (relay) {
+        const serverUrl = normalizeServerUrl(relay);
+        $('serverUrl').value = serverUrl;
+        $('joinServerUrl').value = serverUrl;
+      }
+      if (room) $('roomCodeInput').value = room.trim().toUpperCase();
+      saveSettings();
+      setStatus(`Connection details added${room ? ` for room ${room.trim().toUpperCase()}` : ''}.`, 'ok');
+    }
+
+    $('pasteBtn').addEventListener('click', async () => {
+      try {
+        if (!navigator.clipboard?.readText) throw new Error('Clipboard access is not available here.');
+        importConnectionDetails(await navigator.clipboard.readText());
+      } catch (err) {
+        setStatus(err?.message || 'Could not read connection details from the clipboard.', 'bad');
       }
     });
 
